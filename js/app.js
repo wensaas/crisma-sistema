@@ -400,9 +400,9 @@ function loadInventario() {
   `;
 
   const unsub = db.collection('productos').where('activo', '==', true)
-    .orderBy('nombre')
     .onSnapshot(snap => {
-      window._invProductos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      window._invProductos = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
       updateCatFilter(window._invProductos);
       renderInventarioTable(window._invProductos);
     });
@@ -636,9 +636,10 @@ function loadClientes() {
     </div>
   `;
 
-  const unsub = db.collection('clientes').where('activo', '==', true).orderBy('nombre')
+  const unsub = db.collection('clientes').where('activo', '==', true)
     .onSnapshot(snap => {
-      window._clientes = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      window._clientes = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
       renderClientesTable(window._clientes);
     });
   App.unsubs.push(unsub);
@@ -858,14 +859,15 @@ function renderCreditosTable(creditos) {
 }
 
 async function showAddCreditoModal() {
-  const clientes = await db.collection('clientes').where('activo', '==', true).orderBy('nombre').get();
+  const clientesSnap = await db.collection('clientes').where('activo', '==', true).get();
+  const clientes = clientesSnap.docs.sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || ''));
   openModal('Nuevo crédito', `
     <form id="credito-form">
       <div class="form-group">
         <label>Cliente *</label>
         <select id="crf-cliente" required>
           <option value="">Selecciona un cliente…</option>
-          ${clientes.docs.map(d => `<option value="${d.id}" data-nombre="${esc(d.data().nombre)}">${d.data().nombre}</option>`).join('')}
+          ${clientes.map(d => `<option value="${d.id}" data-nombre="${esc(d.data().nombre)}">${d.data().nombre}</option>`).join('')}
         </select>
         <div class="form-hint">¿No está el cliente? <a href="#" onclick="navigate('clientes')" style="color:var(--blue)">Agrégalo primero</a></div>
       </div>
@@ -1088,8 +1090,10 @@ function renderIngresosTable(ingresos) {
 }
 
 async function showAddIngresoModal() {
-  const prods = await db.collection('productos').where('activo', '==', true).orderBy('nombre').get();
-  const clientes = await db.collection('clientes').where('activo', '==', true).orderBy('nombre').get();
+  const prodsSnap = await db.collection('productos').where('activo', '==', true).get();
+  const prods = prodsSnap.docs.sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || ''));
+  const clientesSnap2 = await db.collection('clientes').where('activo', '==', true).get();
+  const clientes2 = clientesSnap2.docs.sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || ''));
   openModal('Registrar ingreso', `
     <form id="ingreso-form">
       <div class="form-row">
@@ -1107,7 +1111,7 @@ async function showAddIngresoModal() {
           <label>Producto *</label>
           <select id="if-producto" onchange="autoFillPrecio()">
             <option value="">Selecciona producto…</option>
-            ${prods.docs.map(d => `<option value="${d.id}" data-precio="${d.data().precio_venta}" data-nombre="${esc(d.data().nombre)}" data-stock="${d.data().stock}">${d.data().nombre} (stock: ${d.data().stock})</option>`).join('')}
+            ${prods.map(d => `<option value="${d.id}" data-precio="${d.data().precio_venta}" data-nombre="${esc(d.data().nombre)}" data-stock="${d.data().stock}">${d.data().nombre} (stock: ${d.data().stock})</option>`).join('')}
           </select>
         </div>
         <div class="form-row">
@@ -1121,7 +1125,7 @@ async function showAddIngresoModal() {
           <label>Cliente (opcional)</label>
           <select id="if-cliente-venta">
             <option value="">Sin cliente específico</option>
-            ${clientes.docs.map(d => `<option value="${d.id}" data-nombre="${esc(d.data().nombre)}">${d.data().nombre}</option>`).join('')}
+            ${clientes2.map(d => `<option value="${d.id}" data-nombre="${esc(d.data().nombre)}">${d.data().nombre}</option>`).join('')}
           </select>
         </div>
         <div class="form-group">
@@ -1584,10 +1588,12 @@ async function loadNuevaVenta() {
     </div>
   `;
 
-  const [prods, clientes] = await Promise.all([
-    db.collection('productos').where('activo', '==', true).orderBy('nombre').get(),
-    db.collection('clientes').where('activo', '==', true).orderBy('nombre').get(),
+  const [prodsRaw, clientesRaw] = await Promise.all([
+    db.collection('productos').where('activo', '==', true).get(),
+    db.collection('clientes').where('activo', '==', true).get(),
   ]);
+  const prods = { docs: prodsRaw.docs.sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || '')) };
+  const clientes = { docs: clientesRaw.docs.sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || '')) };
 
   $id('venta-rapida').innerHTML = `
     <form id="vr-form">
