@@ -7,7 +7,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
-  <link rel="stylesheet" href="css/app.css?v=9" />
+  <link rel="stylesheet" href="css/app.css?v=10" />
 </head>
 <body>
 
@@ -116,13 +116,31 @@
 <!-- TOAST CONTAINER -->
 <div class="toast-container" id="toast-container"></div>
 
+<!-- Error diagnostics -->
+<script>
+window.onerror = function(msg, src, line, col, err) {
+  var el = document.getElementById('loading-screen');
+  if (el) el.innerHTML = '<div style="color:white;padding:20px;text-align:center;max-width:90%"><p style="font-size:16px;font-weight:bold;margin-bottom:12px">⚠ Error detectado</p><p style="font-size:13px;background:rgba(255,255,255,.15);padding:12px;border-radius:8px;word-break:break-all;text-align:left">' + msg + '<br><small style="opacity:.7">' + src + ':' + line + '</small></p><br><button onclick="location.reload()" style="background:#38d9a9;border:none;color:#0f2942;padding:10px 22px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600">Recargar</button></div>';
+};
+window.addEventListener('unhandledrejection', function(e) {
+  var el = document.getElementById('loading-screen');
+  if (el && !el.querySelector('[data-err]')) el.innerHTML = '<div style="color:white;padding:20px;text-align:center;max-width:90%"><p style="font-size:16px;font-weight:bold;margin-bottom:12px">⚠ Error de promesa</p><p data-err style="font-size:13px;background:rgba(255,255,255,.15);padding:12px;border-radius:8px;word-break:break-all;text-align:left">' + ((e.reason && e.reason.message) ? e.reason.message : String(e.reason)) + '</p><br><button onclick="location.reload()" style="background:#38d9a9;border:none;color:#0f2942;padding:10px 22px;border-radius:6px;cursor:pointer;font-size:14px;font-weight:600">Recargar</button></div>';
+});
+setTimeout(function() {
+  var el = document.getElementById('loading-screen');
+  if (el && !el.classList.contains('hidden')) {
+    el.innerHTML += '<div style="margin-top:20px"><p style="color:rgba(255,255,255,.6);font-size:12px">Tiempo de espera agotado — verifica tu conexión a Internet.</p><br><button onclick="location.reload()" style="background:#1e6bb8;border:none;color:white;padding:10px 22px;border-radius:6px;cursor:pointer;font-size:14px">Reintentar</button></div>';
+  }
+}, 8000);
+</script>
+
 <!-- Firebase SDK (compat) -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 
 <!-- App -->
-<script src="js/config.js?v=9"></script>
-<script src="js/app.js?v=9"></script>
+<script src="js/config.js?v=10"></script>
+<script src="js/app.js?v=10"></script>
 </body>
 </html>
