@@ -275,12 +275,12 @@ async function loadDashboard() {
         </div>
       </div>
       <div class="stat-grid" id="dash-stats">
-        <div class="stat-card"><div class="stat-icon navy">${ico.inventario}</div><div class="stat-label">Productos</div><div class="stat-value" id="d-productos">—</div></div>
-        <div class="stat-card"><div class="stat-icon blue">${ico.clientes}</div><div class="stat-label">Clientes</div><div class="stat-value" id="d-clientes">—</div></div>
-        <div class="stat-card"><div class="stat-icon warning">${ico.creditos}</div><div class="stat-label">Créditos activos</div><div class="stat-value" id="d-creditos">—</div><div class="stat-sub" id="d-creditos-monto"></div></div>
-        <div class="stat-card"><div class="stat-icon teal">${ico.ingresos}</div><div class="stat-label">Ingresos hoy</div><div class="stat-value" id="d-ingresos">—</div></div>
-        <div class="stat-card"><div class="stat-icon danger">${ico.egresos}</div><div class="stat-label">Egresos hoy</div><div class="stat-value" id="d-egresos">—</div></div>
-        <div class="stat-card"><div class="stat-icon navy">${ico.liquidacion}</div><div class="stat-label">Balance hoy</div><div class="stat-value" id="d-balance">—</div></div>
+        <div class="stat-card stat-clickable" onclick="navigate('inventario')" title="Ver inventario"><div class="stat-icon navy">${ico.inventario}</div><div class="stat-label">Productos</div><div class="stat-value" id="d-productos">—</div></div>
+        <div class="stat-card stat-clickable" onclick="navigate('clientes')" title="Ver clientes"><div class="stat-icon blue">${ico.clientes}</div><div class="stat-label">Clientes</div><div class="stat-value" id="d-clientes">—</div><div class="stat-sub" style="color:var(--blue);font-size:11px;margin-top:4px">Ver todos →</div></div>
+        <div class="stat-card stat-clickable" onclick="navigate('creditos')" title="Ver créditos"><div class="stat-icon warning">${ico.creditos}</div><div class="stat-label">Créditos activos</div><div class="stat-value" id="d-creditos">—</div><div class="stat-sub" id="d-creditos-monto"></div></div>
+        <div class="stat-card stat-clickable" onclick="navigate('ingresos')" title="Ver ingresos"><div class="stat-icon teal">${ico.ingresos}</div><div class="stat-label">Ingresos hoy</div><div class="stat-value" id="d-ingresos">—</div></div>
+        <div class="stat-card stat-clickable" onclick="navigate('egresos')" title="Ver egresos"><div class="stat-icon danger">${ico.egresos}</div><div class="stat-label">Egresos hoy</div><div class="stat-value" id="d-egresos">—</div></div>
+        <div class="stat-card stat-clickable" onclick="navigate('liquidacion')" title="Ver liquidación"><div class="stat-icon navy">${ico.liquidacion}</div><div class="stat-label">Balance hoy</div><div class="stat-value" id="d-balance">—</div></div>
       </div>
       <div class="dashboard-grid">
         <div class="card">
@@ -290,6 +290,18 @@ async function loadDashboard() {
         <div class="card">
           <div class="card-header"><h3>${ico.warn} Stock bajo</h3></div>
           <div class="card-body" id="d-stock-bajo"><p class="text-muted text-center" style="padding:20px">Cargando…</p></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:20px">
+        <div class="card-header" style="justify-content:space-between">
+          <h3>${ico.creditos} Créditos pendientes por cobrar</h3>
+          <span id="d-cred-total-badge" style="font-weight:700;color:var(--danger);font-size:15px">—</span>
+        </div>
+        <div class="table-wrapper">
+          <table>
+            <thead><tr><th>Cliente</th><th>Monto original</th><th>Pendiente</th><th>Vencimiento</th><th>Estado</th><th></th></tr></thead>
+            <tbody id="d-cred-tbody"><tr><td colspan="6" class="table-empty">Cargando…</td></tr></tbody>
+          </table>
         </div>
       </div>
     </div>
@@ -358,6 +370,31 @@ async function loadDashboard() {
     const p = d.data();
     return `<div class="alert-item">${ico.warn}<div><div class="alert-name">${p.nombre}</div><div class="alert-sub">Stock: ${p.stock} / Mínimo: ${p.stock_minimo || 5}</div></div></div>`;
   }).join('') : '<p class="text-muted text-center" style="padding:20px">Sin alertas de stock</p>';
+
+  // Credits pending table
+  const credsList = creds.docs.map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (b.saldo_pendiente || 0) - (a.saldo_pendiente || 0));
+  const totalCredPendiente = credsList.reduce((s, c) => s + (c.saldo_pendiente || 0), 0);
+  const badge = $id('d-cred-total-badge');
+  if (badge) badge.textContent = 'Total: ' + fmtMoney(totalCredPendiente);
+  const estadoBadge = { activo: 'badge-info', pagado: 'badge-success', vencido: 'badge-danger' };
+  const credTbody = $id('d-cred-tbody');
+  if (credTbody) {
+    credTbody.innerHTML = credsList.length ? credsList.map(c => `
+      <tr>
+        <td><strong>${c.cliente_nombre || '—'}</strong></td>
+        <td>${fmtMoney(c.monto_original)}</td>
+        <td class="fw-700 amount-expense">${fmtMoney(c.saldo_pendiente)}</td>
+        <td>${fmtDate(c.fecha_vencimiento)}</td>
+        <td><span class="badge ${estadoBadge[c.estado] || 'badge-neutral'}">${c.estado}</span></td>
+        <td>
+          <button class="btn btn-sm btn-success" onclick="showRegistrarPagoModal('${c.id}','${esc(c.cliente_nombre||'')}',${c.saldo_pendiente||0})">
+            ${ico.pay} Registrar abono
+          </button>
+        </td>
+      </tr>
+    `).join('') : '<tr><td colspan="6" class="table-empty">Sin créditos activos</td></tr>';
+  }
 }
 
 // =============================================
@@ -766,6 +803,11 @@ function loadCreditos() {
         <div class="view-header-left"><h2>Créditos</h2><p>Gestión de créditos y cobros</p></div>
         <button class="btn btn-primary" onclick="showAddCreditoModal()">${ico.plus} Nuevo crédito</button>
       </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px">
+        <div class="stat-card"><div class="stat-icon warning">${ico.creditos}</div><div class="stat-label">Créditos activos</div><div class="stat-value" id="cr-stat-activos">—</div></div>
+        <div class="stat-card"><div class="stat-icon danger">${ico.creditos}</div><div class="stat-label">Total pendiente</div><div class="stat-value" id="cr-stat-pendiente" style="color:var(--danger)">—</div></div>
+        <div class="stat-card"><div class="stat-icon navy">${ico.creditos}</div><div class="stat-label">Créditos vencidos</div><div class="stat-value" id="cr-stat-vencidos" style="color:var(--danger)">—</div></div>
+      </div>
       <div class="card">
         <div class="table-toolbar filter-bar">
           <div class="search-box">${ico.search}<input type="text" id="cr-search" placeholder="Buscar cliente…" oninput="filterCreditosTable()" /></div>
@@ -790,9 +832,22 @@ function loadCreditos() {
     .onSnapshot(snap => {
       window._creditos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       checkVencidos();
+      updateCreditosStats(window._creditos);
       renderCreditosTable(window._creditos);
     });
   App.unsubs.push(unsub);
+}
+
+function updateCreditosStats(creditos) {
+  const activos = creditos.filter(c => c.estado === 'activo');
+  const vencidos = creditos.filter(c => c.estado === 'vencido');
+  const totalPendiente = [...activos, ...vencidos].reduce((s, c) => s + (c.saldo_pendiente || 0), 0);
+  const elActivos = $id('cr-stat-activos');
+  const elPendiente = $id('cr-stat-pendiente');
+  const elVencidos = $id('cr-stat-vencidos');
+  if (elActivos) elActivos.textContent = activos.length;
+  if (elPendiente) elPendiente.textContent = fmtMoney(totalPendiente);
+  if (elVencidos) elVencidos.textContent = vencidos.length;
 }
 
 async function checkVencidos() {
@@ -849,9 +904,9 @@ function renderCreditosTable(creditos) {
       </td>
       <td>${fmtDate(c.fecha_vencimiento)}</td>
       <td><span class="badge ${estadoBadge[c.estado]||'badge-neutral'}">${c.estado}</span></td>
-      <td style="white-space:nowrap">
-        ${c.estado !== 'pagado' ? `<button class="btn-icon" title="Registrar pago" onclick="showRegistrarPagoModal('${c.id}','${esc(c.cliente_nombre||'')}',${c.saldo_pendiente||0})">${ico.pay}</button>` : ''}
-        <button class="btn-icon" title="Ver pagos" onclick="showHistorialPagosModal('${c.id}')">${ico.eye}</button>
+      <td style="white-space:nowrap;display:flex;gap:6px;align-items:center">
+        ${c.estado !== 'pagado' ? `<button class="btn btn-sm btn-success" onclick="showRegistrarPagoModal('${c.id}','${esc(c.cliente_nombre||'')}',${c.saldo_pendiente||0})">${ico.pay} Registrar abono</button>` : '<span class="badge badge-success">Saldado</span>'}
+        <button class="btn-icon" title="Ver historial de abonos" onclick="showHistorialPagosModal('${c.id}')">${ico.eye}</button>
         ${isAdmin ? `<button class="btn-icon danger" title="Eliminar" onclick="deleteCredito('${c.id}')">${ico.trash}</button>` : ''}
       </td>
     </tr>`;
