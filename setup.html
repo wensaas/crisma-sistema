@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Configuración Inicial — Tienda Crisma</title>
+  <link rel="stylesheet" href="css/app.css" />
+</head>
+<body>
+
+<div id="loading-screen">
+  <div class="spinner"></div>
+  <p>Verificando estado del sistema…</p>
+</div>
+
+<div id="setup-screen" class="setup-screen hidden">
+  <div class="setup-card">
+    <div class="setup-header">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+        <div class="brand-icon" style="width:44px;height:44px;background:linear-gradient(135deg,#0f2942,#1e6bb8);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:white;flex-shrink:0">C</div>
+        <div>
+          <h2>Configuración inicial</h2>
+          <p>Crear cuentas de acceso para Tienda Crisma</p>
+        </div>
+      </div>
+      <p style="font-size:13px;color:var(--text-muted);line-height:1.6;background:var(--info-bg);border:1px solid #bee3f8;border-radius:8px;padding:12px 14px;">
+        Esta página solo se puede ejecutar una vez. Aquí se crean las cuentas de <strong>Administrador</strong> y <strong>Cajero</strong> en Firebase Authentication.
+      </p>
+    </div>
+
+    <div id="setup-already-done" class="hidden" style="text-align:center;padding:20px">
+      <div style="font-size:48px;margin-bottom:12px">✅</div>
+      <h3 style="color:var(--navy);margin-bottom:8px">Sistema ya configurado</h3>
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:20px">Las cuentas de acceso ya fueron creadas.</p>
+      <a href="index.html" class="btn btn-primary">Ir al sistema</a>
+    </div>
+
+    <form id="setup-form">
+      <div class="setup-section">
+        <h4>👑 Cuenta de Administrador</h4>
+        <div class="form-group">
+          <label>Nombre completo</label>
+          <input type="text" id="admin-name" value="Administrador Crisma" required />
+        </div>
+        <div class="form-group">
+          <label>Correo electrónico</label>
+          <input type="email" id="admin-email" value="admin@crisma.com" required />
+        </div>
+        <div class="form-group">
+          <label>Contraseña</label>
+          <input type="password" id="admin-pass" placeholder="Mín. 8 caracteres" required minlength="8" />
+        </div>
+      </div>
+
+      <div class="setup-section">
+        <h4>🧾 Cuenta de Cajero</h4>
+        <div class="form-group">
+          <label>Nombre completo</label>
+          <input type="text" id="cajero-name" value="Cajero Crisma" required />
+        </div>
+        <div class="form-group">
+          <label>Correo electrónico</label>
+          <input type="email" id="cajero-email" value="cajero@crisma.com" required />
+        </div>
+        <div class="form-group">
+          <label>Contraseña</label>
+          <input type="password" id="cajero-pass" placeholder="Mín. 8 caracteres" required minlength="8" />
+        </div>
+      </div>
+
+      <div id="setup-error" class="error-msg hidden"></div>
+      <div id="setup-success" class="hidden" style="background:var(--success-bg);color:var(--teal-dark);border:1px solid rgba(56,217,169,.4);border-radius:8px;padding:14px 16px;font-size:13px;margin-bottom:16px;"></div>
+
+      <button type="submit" class="btn btn-primary btn-full btn-lg" id="setup-btn">Crear cuentas y configurar sistema</button>
+    </form>
+  </div>
+</div>
+
+<div class="toast-container" id="toast-container"></div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="js/config.js"></script>
+<script>
+(async function() {
+  const loading = document.getElementById('loading-screen');
+  const screen = document.getElementById('setup-screen');
+
+  try {
+    const snap = await db.collection('_config').doc('setup').get();
+    loading.classList.add('hidden');
+    screen.classList.remove('hidden');
+    if (snap.exists && snap.data().completado) {
+      document.getElementById('setup-form').classList.add('hidden');
+      document.getElementById('setup-already-done').classList.remove('hidden');
+      return;
+    }
+  } catch(e) {
+    loading.classList.add('hidden');
+    screen.classList.remove('hidden');
+  }
+
+  document.getElementById('setup-form').addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const btn = document.getElementById('setup-btn');
+    const errEl = document.getElementById('setup-error');
+    const succEl = document.getElementById('setup-success');
+    btn.disabled = true;
+    btn.textContent = 'Creando cuentas…';
+    errEl.classList.add('hidden');
+    succEl.classList.add('hidden');
+
+    const adminEmail = document.getElementById('admin-email').value.trim();
+    const adminPass = document.getElementById('admin-pass').value;
+    const adminName = document.getElementById('admin-name').value.trim();
+    const cajeroEmail = document.getElementById('cajero-email').value.trim();
+    const cajeroPass = document.getElementById('cajero-pass').value;
+    const cajeroName = document.getElementById('cajero-name').value.trim();
+
+    try {
+      // Create admin
+      const adminCred = await auth.createUserWithEmailAndPassword(adminEmail, adminPass);
+      await db.collection('usuarios').doc(adminCred.user.uid).set({
+        nombre: adminName, email: adminEmail, rol: 'admin', activo: true,
+        creado_en: firebase.firestore.FieldValue.serverTimestamp()
+      });
+
+      // Sign out admin, create cajero
+      await auth.signOut();
+      const cajeroCred = await auth.createUserWithEmailAndPassword(cajeroEmail, cajeroPass);
+      await db.collection('usuarios').doc(cajeroCred.user.uid).set({
+        nombre: cajeroName, email: cajeroEmail, rol: 'cajero', activo: true,
+        creado_en: firebase.firestore.FieldValue.serverTimestamp()
+      });
+
+      // Sign out cajero and mark setup done
+      await auth.signOut();
+      await db.collection('_config').doc('setup').set({
+        completado: true, fecha: firebase.firestore.FieldValue.serverTimestamp()
+      });
+
+      succEl.innerHTML = `
+        <strong>✅ Sistema configurado correctamente</strong><br>
+        <strong>Admin:</strong> ${adminEmail}<br>
+        <strong>Cajero:</strong> ${cajeroEmail}<br>
+        <br>
+        <a href="index.html" style="color:var(--teal-dark);font-weight:700">→ Ir al sistema</a>
+      `;
+      succEl.classList.remove('hidden');
+      document.getElementById('setup-form').querySelectorAll('input, button').forEach(el => el.disabled = true);
+    } catch(err) {
+      let msg = err.message;
+      if (err.code === 'auth/email-already-in-use') msg = 'Uno de los correos ya está registrado.';
+      if (err.code === 'auth/weak-password') msg = 'La contraseña es muy débil (mínimo 8 caracteres).';
+      errEl.textContent = msg;
+      errEl.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = 'Crear cuentas y configurar sistema';
+    }
+  });
+})();
+</script>
+</body>
+</html>
