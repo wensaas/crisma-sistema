@@ -732,10 +732,10 @@ function renderClientesTable(clientes) {
       <td>${c.email || '—'}</td>
       <td>${c.direccion || '—'}</td>
       <td>${fmtDate(c.creado_en)}</td>
-      <td style="white-space:nowrap">
-        ${isAdmin ? `<button class="btn-icon" title="Editar" onclick="showEditClienteModal('${c.id}')">${ico.edit}</button>` : ''}
-        ${isAdmin ? `<button class="btn-icon danger" title="Eliminar" onclick="deleteCliente('${c.id}','${esc(c.nombre)}')">${ico.trash}</button>` : ''}
+      <td style="white-space:nowrap;display:flex;gap:6px;align-items:center">
+        <button class="btn btn-sm btn-secondary" onclick="showEditClienteModal('${c.id}')">${ico.edit} Editar</button>
         <button class="btn-icon" title="Ver créditos" onclick="navigate('creditos');setTimeout(()=>filtrarCreditosPorCliente('${c.id}'),800)">${ico.creditos}</button>
+        ${isAdmin ? `<button class="btn-icon danger" title="Eliminar" onclick="deleteCliente('${c.id}','${esc(c.nombre)}')">${ico.trash}</button>` : ''}
       </td>
     </tr>
   `).join('');
