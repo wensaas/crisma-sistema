@@ -1,15 +1,10 @@
-// =============================================
-// CONFIGURACIÓN DE FIREBASE — TIENDA CRISMA
-// Reemplaza estos valores con los de tu proyecto
-// Firebase Console: https://console.firebase.google.com
-// =============================================
 const firebaseConfig = {
-  apiKey: "REPLACE_API_KEY",
-  authDomain: "REPLACE_AUTH_DOMAIN",
-  projectId: "REPLACE_PROJECT_ID",
-  storageBucket: "REPLACE_STORAGE_BUCKET",
-  messagingSenderId: "REPLACE_MESSAGING_SENDER_ID",
-  appId: "REPLACE_APP_ID"
+  apiKey: "AIzaSyCbg3EMttXQlcL8VrAT2XIDiDv6TyzKP2I",
+  authDomain: "crismatienda-6cabf.firebaseapp.com",
+  projectId: "crismatienda-6cabf",
+  storageBucket: "crismatienda-6cabf.firebasestorage.app",
+  messagingSenderId: "106650850972",
+  appId: "1:106650850972:web:706edbafb78fa5371fbf59"
 };
 
 firebase.initializeApp(firebaseConfig);
