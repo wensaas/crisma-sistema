@@ -269,19 +269,51 @@ async function loadDashboard() {
   $id('view-container').innerHTML = `
     <div class="view">
       <div class="view-header">
-        <div class="view-header-left">
-          <h2>Dashboard</h2>
-          <p>Resumen general de Tienda Crisma</p>
+        <div class="view-header-left"><h2>Dashboard</h2><p>Resumen general de Tienda Crisma</p></div>
+      </div>
+      <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
+        <div class="stat-card stat-clickable" onclick="navigate('inventario')"><div class="stat-icon navy">${ico.inventario}</div><div class="stat-label">Productos</div><div class="stat-value" id="d-productos">…</div></div>
+        <div class="stat-card stat-clickable" onclick="navigate('clientes')"><div class="stat-icon blue">${ico.clientes}</div><div class="stat-label">Clientes</div><div class="stat-value" id="d-clientes">…</div></div>
+        <div class="stat-card stat-clickable" onclick="navigate('creditos')"><div class="stat-icon warning">${ico.creditos}</div><div class="stat-label">Créditos activos</div><div class="stat-value" id="d-creditos">…</div><div class="stat-sub" id="d-creditos-monto"></div></div>
+        <div class="stat-card stat-clickable" onclick="navigate('liquidacion')"><div class="stat-icon navy">${ico.liquidacion}</div><div class="stat-label">Pendiente cobrar</div><div class="stat-value" id="d-cred-pendiente" style="color:var(--danger)">…</div></div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-header"><h3>Resumen financiero por período</h3></div>
+        <div style="overflow-x:auto">
+          <table style="min-width:500px">
+            <thead>
+              <tr style="background:#f7fafc">
+                <th style="padding:12px 20px;font-size:12px;color:var(--text-muted)">Concepto</th>
+                <th style="padding:12px 20px;text-align:right;font-size:12px;color:var(--text-muted)">Hoy</th>
+                <th style="padding:12px 20px;text-align:right;font-size:12px;color:var(--text-muted)">Esta semana</th>
+                <th style="padding:12px 20px;text-align:right;font-size:12px;color:var(--text-muted)">Este mes</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:14px 20px;font-weight:600;color:var(--teal-dark)">${ico.ingresos} Ingresos</td>
+                <td style="padding:14px 20px;text-align:right;font-weight:700;color:var(--teal-dark)" id="d-ing-dia">…</td>
+                <td style="padding:14px 20px;text-align:right;font-weight:700;color:var(--teal-dark)" id="d-ing-sem">…</td>
+                <td style="padding:14px 20px;text-align:right;font-weight:700;color:var(--teal-dark)" id="d-ing-mes">…</td>
+              </tr>
+              <tr style="border-bottom:1px solid var(--border)">
+                <td style="padding:14px 20px;font-weight:600;color:var(--danger)">${ico.egresos} Egresos</td>
+                <td style="padding:14px 20px;text-align:right;font-weight:700;color:var(--danger)" id="d-egr-dia">…</td>
+                <td style="padding:14px 20px;text-align:right;font-weight:700;color:var(--danger)" id="d-egr-sem">…</td>
+                <td style="padding:14px 20px;text-align:right;font-weight:700;color:var(--danger)" id="d-egr-mes">…</td>
+              </tr>
+              <tr style="background:#f7fafc">
+                <td style="padding:14px 20px;font-weight:700;color:var(--navy)">Balance neto</td>
+                <td style="padding:14px 20px;text-align:right;font-weight:700" id="d-bal-dia">…</td>
+                <td style="padding:14px 20px;text-align:right;font-weight:700" id="d-bal-sem">…</td>
+                <td style="padding:14px 20px;text-align:right;font-weight:700" id="d-bal-mes">…</td>
+              </tr>
+            </tbody>
+          </table>
         </div>
       </div>
-      <div class="stat-grid" id="dash-stats">
-        <div class="stat-card stat-clickable" onclick="navigate('inventario')" title="Ver inventario"><div class="stat-icon navy">${ico.inventario}</div><div class="stat-label">Productos</div><div class="stat-value" id="d-productos">—</div></div>
-        <div class="stat-card stat-clickable" onclick="navigate('clientes')" title="Ver clientes"><div class="stat-icon blue">${ico.clientes}</div><div class="stat-label">Clientes</div><div class="stat-value" id="d-clientes">—</div><div class="stat-sub" style="color:var(--blue);font-size:11px;margin-top:4px">Ver todos →</div></div>
-        <div class="stat-card stat-clickable" onclick="navigate('creditos')" title="Ver créditos"><div class="stat-icon warning">${ico.creditos}</div><div class="stat-label">Créditos activos</div><div class="stat-value" id="d-creditos">—</div><div class="stat-sub" id="d-creditos-monto"></div></div>
-        <div class="stat-card stat-clickable" onclick="navigate('ingresos')" title="Ver ingresos"><div class="stat-icon teal">${ico.ingresos}</div><div class="stat-label">Ingresos hoy</div><div class="stat-value" id="d-ingresos">—</div></div>
-        <div class="stat-card stat-clickable" onclick="navigate('egresos')" title="Ver egresos"><div class="stat-icon danger">${ico.egresos}</div><div class="stat-label">Egresos hoy</div><div class="stat-value" id="d-egresos">—</div></div>
-        <div class="stat-card stat-clickable" onclick="navigate('liquidacion')" title="Ver liquidación"><div class="stat-icon navy">${ico.liquidacion}</div><div class="stat-label">Balance hoy</div><div class="stat-value" id="d-balance">—</div></div>
-      </div>
+
       <div class="dashboard-grid">
         <div class="card">
           <div class="card-header"><h3>Actividad reciente</h3></div>
@@ -292,10 +324,11 @@ async function loadDashboard() {
           <div class="card-body" id="d-stock-bajo"><p class="text-muted text-center" style="padding:20px">Cargando…</p></div>
         </div>
       </div>
+
       <div class="card" style="margin-top:20px">
-        <div class="card-header" style="justify-content:space-between">
-          <h3>${ico.creditos} Créditos pendientes por cobrar</h3>
-          <span id="d-cred-total-badge" style="font-weight:700;color:var(--danger);font-size:15px">—</span>
+        <div class="card-header">
+          <h3>${ico.creditos} Créditos pendientes</h3>
+          <span id="d-cred-total-badge" style="font-weight:700;color:var(--danger);font-size:15px"></span>
         </div>
         <div class="table-wrapper">
           <table>
@@ -307,93 +340,116 @@ async function loadDashboard() {
     </div>
   `;
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const tomorrow = new Date(today); tomorrow.setDate(tomorrow.getDate() + 1);
+  try {
+    const now = new Date();
+    const diaInicio = new Date(now); diaInicio.setHours(0,0,0,0);
+    const diaFin   = new Date(now); diaFin.setHours(23,59,59,999);
 
-  const [prods, clts, creds, ing, egr] = await Promise.all([
-    db.collection('productos').where('activo', '==', true).get(),
-    db.collection('clientes').where('activo', '==', true).get(),
-    db.collection('creditos').where('estado', '==', 'activo').get(),
-    db.collection('ingresos').where('fecha', '>=', today).where('fecha', '<', tomorrow).get(),
-    db.collection('egresos').where('fecha', '>=', today).where('fecha', '<', tomorrow).get(),
-  ]);
+    const semInicio = new Date(now);
+    const dow = semInicio.getDay();
+    semInicio.setDate(semInicio.getDate() - (dow === 0 ? 6 : dow - 1));
+    semInicio.setHours(0,0,0,0);
 
-  const totalIng = ing.docs.reduce((s, d) => s + (d.data().monto || 0), 0);
-  const totalEgr = egr.docs.reduce((s, d) => s + (d.data().monto || 0), 0);
-  const totalCred = creds.docs.reduce((s, d) => s + (d.data().saldo_pendiente || 0), 0);
+    const mesInicio = new Date(now.getFullYear(), now.getMonth(), 1);
 
-  $id('d-productos').textContent = prods.size;
-  $id('d-clientes').textContent = clts.size;
-  $id('d-creditos').textContent = creds.size;
-  $id('d-creditos-monto').textContent = fmtMoney(totalCred) + ' pendiente';
-  $id('d-ingresos').textContent = fmtMoney(totalIng);
-  $id('d-egresos').textContent = fmtMoney(totalEgr);
-  const balance = totalIng - totalEgr;
-  const balEl = $id('d-balance');
-  balEl.textContent = fmtMoney(balance);
-  balEl.style.color = balance >= 0 ? 'var(--teal-dark)' : 'var(--danger)';
+    // Cargar todo con get() simple
+    const [prodsSnap, cltsSnap, credsSnap, allIng, allEgr] = await Promise.all([
+      db.collection('productos').get(),
+      db.collection('clientes').get(),
+      db.collection('creditos').get(),
+      db.collection('ingresos').get(),
+      db.collection('egresos').get(),
+    ]);
 
-  // Recent activity (last 10 ingresos + egresos)
-  const [recentIng, recentEgr] = await Promise.all([
-    db.collection('ingresos').orderBy('fecha', 'desc').limit(5).get(),
-    db.collection('egresos').orderBy('fecha', 'desc').limit(5).get(),
-  ]);
-  const activities = [
-    ...recentIng.docs.map(d => ({ ...d.data(), type: 'income' })),
-    ...recentEgr.docs.map(d => ({ ...d.data(), type: 'expense' })),
-  ].sort((a, b) => {
-    const ta = a.fecha?.toDate ? a.fecha.toDate() : new Date(0);
-    const tb = b.fecha?.toDate ? b.fecha.toDate() : new Date(0);
-    return tb - ta;
-  }).slice(0, 8);
+    const prods = prodsSnap.docs.filter(d => d.data().activo !== false);
+    const clts  = cltsSnap.docs.filter(d => d.data().activo !== false);
+    const credsActivos = credsSnap.docs.filter(d => ['activo','vencido'].includes(d.data().estado));
 
-  $id('d-actividad').innerHTML = activities.length ? activities.map(a => `
-    <div class="activity-item">
-      <div class="activity-dot ${a.type}">${a.type === 'income' ? '↑' : '↓'}</div>
-      <div>
-        <div class="act-concept">${a.concepto || '—'}</div>
-        <div class="act-meta">${fmtDate(a.fecha)}</div>
+    // Helpers de período
+    const enRango = (doc, desde, hasta) => {
+      const f = doc.data().fecha?.toDate ? doc.data().fecha.toDate() : null;
+      return f && f >= desde && f <= hasta;
+    };
+    const suma = docs => docs.reduce((s, d) => s + (d.data().monto || 0), 0);
+
+    const ingDia = suma(allIng.docs.filter(d => enRango(d, diaInicio, diaFin)));
+    const ingSem = suma(allIng.docs.filter(d => enRango(d, semInicio, diaFin)));
+    const ingMes = suma(allIng.docs.filter(d => enRango(d, mesInicio, diaFin)));
+    const egrDia = suma(allEgr.docs.filter(d => enRango(d, diaInicio, diaFin)));
+    const egrSem = suma(allEgr.docs.filter(d => enRango(d, semInicio, diaFin)));
+    const egrMes = suma(allEgr.docs.filter(d => enRango(d, mesInicio, diaFin)));
+
+    const balColor = n => n >= 0 ? 'var(--teal-dark)' : 'var(--danger)';
+    const setVal = (id, val, color) => {
+      const el = $id(id); if (!el) return;
+      el.textContent = val;
+      if (color) el.style.color = color;
+    };
+
+    const totalCredPend = credsActivos.reduce((s, d) => s + (d.data().saldo_pendiente || 0), 0);
+
+    setVal('d-productos', prods.length);
+    setVal('d-clientes',  clts.length);
+    setVal('d-creditos',  credsActivos.length);
+    setVal('d-cred-pendiente', fmtMoney(totalCredPend));
+
+    setVal('d-ing-dia', fmtMoney(ingDia)); setVal('d-ing-sem', fmtMoney(ingSem)); setVal('d-ing-mes', fmtMoney(ingMes));
+    setVal('d-egr-dia', fmtMoney(egrDia)); setVal('d-egr-sem', fmtMoney(egrSem)); setVal('d-egr-mes', fmtMoney(egrMes));
+    setVal('d-bal-dia', fmtMoney(ingDia-egrDia), balColor(ingDia-egrDia));
+    setVal('d-bal-sem', fmtMoney(ingSem-egrSem), balColor(ingSem-egrSem));
+    setVal('d-bal-mes', fmtMoney(ingMes-egrMes), balColor(ingMes-egrMes));
+
+    // Actividad reciente
+    const activities = [
+      ...allIng.docs.map(d => ({ ...d.data(), type: 'income' })),
+      ...allEgr.docs.map(d => ({ ...d.data(), type: 'expense' })),
+    ].sort((a, b) => {
+      const ta = a.fecha?.toDate ? a.fecha.toDate() : new Date(0);
+      const tb = b.fecha?.toDate ? b.fecha.toDate() : new Date(0);
+      return tb - ta;
+    }).slice(0, 8);
+
+    setVal('d-actividad', '');
+    $id('d-actividad').innerHTML = activities.length ? activities.map(a => `
+      <div class="activity-item">
+        <div class="activity-dot ${a.type}">${a.type === 'income' ? '↑' : '↓'}</div>
+        <div>
+          <div class="act-concept">${a.concepto || '—'}</div>
+          <div class="act-meta">${fmtDate(a.fecha)}</div>
+        </div>
+        <div class="act-amount ${a.type === 'income' ? 'amount-income' : 'amount-expense'}">
+          ${a.type === 'income' ? '+' : '-'}${fmtMoney(a.monto)}
+        </div>
       </div>
-      <div class="act-amount ${a.type === 'income' ? 'amount-income' : 'amount-expense'}">
-        ${a.type === 'income' ? '+' : '-'}${fmtMoney(a.monto)}
-      </div>
-    </div>
-  `).join('') : '<p class="text-muted text-center" style="padding:20px">Sin actividad reciente</p>';
+    `).join('') : '<p class="text-muted text-center" style="padding:20px">Sin actividad reciente</p>';
 
-  // Low stock
-  const lowStock = prods.docs.filter(d => {
-    const p = d.data();
-    return p.stock <= (p.stock_minimo || 5);
-  });
-  $id('d-stock-bajo').innerHTML = lowStock.length ? lowStock.map(d => {
-    const p = d.data();
-    return `<div class="alert-item">${ico.warn}<div><div class="alert-name">${p.nombre}</div><div class="alert-sub">Stock: ${p.stock} / Mínimo: ${p.stock_minimo || 5}</div></div></div>`;
-  }).join('') : '<p class="text-muted text-center" style="padding:20px">Sin alertas de stock</p>';
+    // Stock bajo
+    const lowStock = prods.filter(d => d.data().stock <= (d.data().stock_minimo || 5));
+    $id('d-stock-bajo').innerHTML = lowStock.length ? lowStock.map(d => {
+      const p = d.data();
+      return `<div class="alert-item">${ico.warn}<div><div class="alert-name">${p.nombre}</div><div class="alert-sub">Stock: ${p.stock} / Mínimo: ${p.stock_minimo||5}</div></div></div>`;
+    }).join('') : '<p class="text-muted text-center" style="padding:20px">Sin alertas de stock</p>';
 
-  // Credits pending table
-  const credsList = creds.docs.map(d => ({ id: d.id, ...d.data() }))
-    .sort((a, b) => (b.saldo_pendiente || 0) - (a.saldo_pendiente || 0));
-  const totalCredPendiente = credsList.reduce((s, c) => s + (c.saldo_pendiente || 0), 0);
-  const badge = $id('d-cred-total-badge');
-  if (badge) badge.textContent = 'Total: ' + fmtMoney(totalCredPendiente);
-  const estadoBadge = { activo: 'badge-info', pagado: 'badge-success', vencido: 'badge-danger' };
-  const credTbody = $id('d-cred-tbody');
-  if (credTbody) {
-    credTbody.innerHTML = credsList.length ? credsList.map(c => `
+    // Créditos pendientes
+    const credsList = credsActivos.map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (b.saldo_pendiente||0) - (a.saldo_pendiente||0));
+    const estadoBadge = { activo:'badge-info', vencido:'badge-danger', pagado:'badge-success' };
+    const badge = $id('d-cred-total-badge');
+    if (badge) badge.textContent = 'Total: ' + fmtMoney(totalCredPend);
+    const credTbody = $id('d-cred-tbody');
+    if (credTbody) credTbody.innerHTML = credsList.length ? credsList.map(c => `
       <tr>
-        <td><strong>${c.cliente_nombre || '—'}</strong></td>
+        <td><strong>${c.cliente_nombre||'—'}</strong></td>
         <td>${fmtMoney(c.monto_original)}</td>
         <td class="fw-700 amount-expense">${fmtMoney(c.saldo_pendiente)}</td>
         <td>${fmtDate(c.fecha_vencimiento)}</td>
-        <td><span class="badge ${estadoBadge[c.estado] || 'badge-neutral'}">${c.estado}</span></td>
-        <td>
-          <button class="btn btn-sm btn-success" onclick="showRegistrarPagoModal('${c.id}','${esc(c.cliente_nombre||'')}',${c.saldo_pendiente||0})">
-            ${ico.pay} Registrar abono
-          </button>
-        </td>
+        <td><span class="badge ${estadoBadge[c.estado]||'badge-neutral'}">${c.estado}</span></td>
+        <td><button class="btn btn-sm btn-success" onclick="showRegistrarPagoModal('${c.id}','${esc(c.cliente_nombre||'')}',${c.saldo_pendiente||0})">${ico.pay} Registrar abono</button></td>
       </tr>
     `).join('') : '<tr><td colspan="6" class="table-empty">Sin créditos activos</td></tr>';
+
+  } catch(err) {
+    showToast('Error en dashboard: ' + err.message, 'error');
   }
 }
 
@@ -436,27 +492,15 @@ async function loadInventario() {
     </div>
   `;
 
-  const refrescarInventario = async () => {
-    try {
-      const snap = await db.collection('productos').get();
-      window._invProductos = snap.docs
-        .filter(d => d.data().activo !== false)
-        .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
-      updateCatFilter(window._invProductos);
-      renderInventarioTable(window._invProductos);
-    } catch(err) {
-      showToast('Error al cargar inventario: ' + err.message, 'error');
-    }
-  };
-
-  await refrescarInventario();
-
-  const unsub = db.collection('productos').onSnapshot(
-    () => refrescarInventario(),
-    err => console.warn('Inventario listener:', err)
-  );
-  App.unsubs.push(unsub);
+  try {
+    const snap = await db.collection('productos').get();
+    window._invProductos = snap.docs
+      .filter(d => d.data().activo !== false)
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (a.nombre||'').localeCompare(b.nombre||''));
+    updateCatFilter(window._invProductos);
+    renderInventarioTable(window._invProductos);
+  } catch(err) { showToast('Error: ' + err.message, 'error'); }
 }
 
 function updateCatFilter(productos) {
@@ -553,7 +597,7 @@ function showAddProductoModal() {
     try {
       await db.collection('productos').add(data);
       showToast('Producto agregado correctamente');
-      closeModal();
+      closeModal(); loadInventario();
     } catch(e) { showToast('Error al guardar: ' + e.message, 'error'); }
   });
 }
@@ -601,7 +645,7 @@ async function showEditProductoModal(id) {
         actualizado_en: firebase.firestore.FieldValue.serverTimestamp(),
       });
       showToast('Producto actualizado');
-      closeModal();
+      closeModal(); loadInventario();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
   });
 }
@@ -686,27 +730,14 @@ async function loadClientes() {
     </div>
   `;
 
-  const refrescarClientes = async () => {
-    try {
-      const snap = await db.collection('clientes').get();
-      window._clientes = snap.docs
-        .filter(d => d.data().activo !== false)
-        .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
-      renderClientesTable(window._clientes);
-    } catch(err) {
-      showToast('Error al cargar clientes: ' + err.message, 'error');
-    }
-  };
-
-  await refrescarClientes();
-
-  // Escucha cambios en tiempo real sin filtro where (evita problema de índices)
-  const unsub = db.collection('clientes').onSnapshot(
-    () => refrescarClientes(),
-    err => console.warn('Clientes listener:', err)
-  );
-  App.unsubs.push(unsub);
+  try {
+    const snap = await db.collection('clientes').get();
+    window._clientes = snap.docs
+      .filter(d => d.data().activo !== false)
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => (a.nombre||'').localeCompare(b.nombre||''));
+    renderClientesTable(window._clientes);
+  } catch(err) { showToast('Error: ' + err.message, 'error'); }
 }
 
 function filterClientesTable() {
@@ -770,7 +801,7 @@ function showAddClienteModal() {
         creado_en: firebase.firestore.FieldValue.serverTimestamp(),
       });
       showToast('Cliente agregado');
-      closeModal();
+      closeModal(); loadClientes();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
   });
 }
@@ -805,7 +836,7 @@ async function showEditClienteModal(id) {
         notas: $id('cf-notas').value.trim(),
       });
       showToast('Cliente actualizado');
-      closeModal();
+      closeModal(); loadClientes();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
   });
 }
@@ -855,31 +886,19 @@ async function loadCreditos() {
     </div>
   `;
 
-  const refrescarCreditos = async () => {
-    try {
-      const snap = await db.collection('creditos').get();
-      window._creditos = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => {
-          const ta = a.creado_en?.toDate ? a.creado_en.toDate() : new Date(0);
-          const tb = b.creado_en?.toDate ? b.creado_en.toDate() : new Date(0);
-          return tb - ta;
-        });
-      await checkVencidos();
-      updateCreditosStats(window._creditos);
-      renderCreditosTable(window._creditos);
-    } catch(err) {
-      showToast('Error al cargar créditos: ' + err.message, 'error');
-    }
-  };
-
-  await refrescarCreditos();
-
-  const unsub = db.collection('creditos').onSnapshot(
-    () => refrescarCreditos(),
-    err => console.warn('Créditos listener:', err)
-  );
-  App.unsubs.push(unsub);
+  try {
+    const snap = await db.collection('creditos').get();
+    window._creditos = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => {
+        const ta = a.creado_en?.toDate ? a.creado_en.toDate() : new Date(0);
+        const tb = b.creado_en?.toDate ? b.creado_en.toDate() : new Date(0);
+        return tb - ta;
+      });
+    await checkVencidos();
+    updateCreditosStats(window._creditos);
+    renderCreditosTable(window._creditos);
+  } catch(err) { showToast('Error: ' + err.message, 'error'); }
 }
 
 function updateCreditosStats(creditos) {
@@ -1004,7 +1023,7 @@ async function showAddCreditoModal() {
         creado_en: firebase.firestore.FieldValue.serverTimestamp(),
       });
       showToast('Crédito creado');
-      closeModal();
+      closeModal(); loadCreditos();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
   });
 }
@@ -1129,27 +1148,17 @@ async function loadIngresos() {
     </div>
   `;
 
-  const refrescarIngresos = async () => {
-    try {
-      const snap = await db.collection('ingresos').get();
-      window._ingresos = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => {
-          const ta = a.fecha?.toDate ? a.fecha.toDate() : new Date(0);
-          const tb = b.fecha?.toDate ? b.fecha.toDate() : new Date(0);
-          return tb - ta;
-        });
-      filterIngresosTable();
-    } catch(err) {
-      showToast('Error al cargar ingresos: ' + err.message, 'error');
-    }
-  };
-  await refrescarIngresos();
-  const unsub = db.collection('ingresos').onSnapshot(
-    () => refrescarIngresos(),
-    err => console.warn('Ingresos listener:', err)
-  );
-  App.unsubs.push(unsub);
+  try {
+    const snap = await db.collection('ingresos').get();
+    window._ingresos = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => {
+        const ta = a.fecha?.toDate ? a.fecha.toDate() : new Date(0);
+        const tb = b.fecha?.toDate ? b.fecha.toDate() : new Date(0);
+        return tb - ta;
+      });
+    filterIngresosTable();
+  } catch(err) { showToast('Error: ' + err.message, 'error'); }
 }
 
 function filterIngresosTable() {
@@ -1324,7 +1333,7 @@ async function showAddIngresoModal() {
         });
       }
       showToast('Ingreso registrado');
-      closeModal();
+      closeModal(); loadIngresos();
     } catch(err) { showToast('Error: ' + err.message, 'error'); }
   });
 }
@@ -1400,27 +1409,17 @@ async function loadEgresos() {
     </div>
   `;
 
-  const refrescarEgresos = async () => {
-    try {
-      const snap = await db.collection('egresos').get();
-      window._egresos = snap.docs
-        .map(d => ({ id: d.id, ...d.data() }))
-        .sort((a, b) => {
-          const ta = a.fecha?.toDate ? a.fecha.toDate() : new Date(0);
-          const tb = b.fecha?.toDate ? b.fecha.toDate() : new Date(0);
-          return tb - ta;
-        });
-      filterEgresosTable();
-    } catch(err) {
-      showToast('Error al cargar egresos: ' + err.message, 'error');
-    }
-  };
-  await refrescarEgresos();
-  const unsub = db.collection('egresos').onSnapshot(
-    () => refrescarEgresos(),
-    err => console.warn('Egresos listener:', err)
-  );
-  App.unsubs.push(unsub);
+  try {
+    const snap = await db.collection('egresos').get();
+    window._egresos = snap.docs
+      .map(d => ({ id: d.id, ...d.data() }))
+      .sort((a, b) => {
+        const ta = a.fecha?.toDate ? a.fecha.toDate() : new Date(0);
+        const tb = b.fecha?.toDate ? b.fecha.toDate() : new Date(0);
+        return tb - ta;
+      });
+    filterEgresosTable();
+  } catch(err) { showToast('Error: ' + err.message, 'error'); }
 }
 
 function filterEgresosTable() {
@@ -1520,7 +1519,7 @@ function showAddEgresoModal() {
         fecha: firebase.firestore.Timestamp.fromDate(parseLocalDate($id('ef-fecha').value)),
       });
       showToast('Egreso registrado');
-      closeModal();
+      closeModal(); loadEgresos();
     } catch(err) { showToast('Error: ' + err.message, 'error'); }
   });
 }
