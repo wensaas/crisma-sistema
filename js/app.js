@@ -136,25 +136,30 @@ function clearUnsubs() {
 // =============================================
 
 auth.onAuthStateChanged(async (user) => {
-  if (user) {
-    try {
-      const snap = await db.collection('usuarios').doc(user.uid).get();
+  try {
+    if (user) {
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 10000));
+      const snap = await Promise.race([db.collection('usuarios').doc(user.uid).get(), timeout]);
       if (!snap.exists || !snap.data().activo) {
-        await auth.signOut();
-        return;
+        auth.signOut();
+        showLogin();
+      } else {
+        App.user = user;
+        App.userData = { uid: user.uid, ...snap.data() };
+        showApp();
       }
-      App.user = user;
-      App.userData = { uid: user.uid, ...snap.data() };
-      showApp();
-    } catch(e) {
+    } else {
+      App.user = null;
+      App.userData = null;
       showLogin();
     }
-  } else {
+  } catch(e) {
     App.user = null;
     App.userData = null;
     showLogin();
+  } finally {
+    $id('loading-screen').classList.add('hidden');
   }
-  $id('loading-screen').classList.add('hidden');
 });
 
 function showLogin() {
