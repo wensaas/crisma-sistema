@@ -436,13 +436,26 @@ function loadInventario() {
     </div>
   `;
 
-  const unsub = db.collection('productos').where('activo', '==', true)
-    .onSnapshot(snap => {
-      window._invProductos = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+  const refrescarInventario = async () => {
+    try {
+      const snap = await db.collection('productos').get();
+      window._invProductos = snap.docs
+        .filter(d => d.data().activo !== false)
+        .map(d => ({ id: d.id, ...d.data() }))
         .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
       updateCatFilter(window._invProductos);
       renderInventarioTable(window._invProductos);
-    });
+    } catch(err) {
+      showToast('Error al cargar inventario: ' + err.message, 'error');
+    }
+  };
+
+  await refrescarInventario();
+
+  const unsub = db.collection('productos').onSnapshot(
+    () => refrescarInventario(),
+    err => console.warn('Inventario listener:', err)
+  );
   App.unsubs.push(unsub);
 }
 
@@ -651,7 +664,7 @@ async function deleteProducto(id, nombre) {
 // CLIENTES
 // =============================================
 
-function loadClientes() {
+async function loadClientes() {
   const isAdmin = App.userData.rol === 'admin';
   $id('view-container').innerHTML = `
     <div class="view">
@@ -673,12 +686,26 @@ function loadClientes() {
     </div>
   `;
 
-  const unsub = db.collection('clientes').where('activo', '==', true)
-    .onSnapshot(snap => {
-      window._clientes = snap.docs.map(d => ({ id: d.id, ...d.data() }))
+  const refrescarClientes = async () => {
+    try {
+      const snap = await db.collection('clientes').get();
+      window._clientes = snap.docs
+        .filter(d => d.data().activo !== false)
+        .map(d => ({ id: d.id, ...d.data() }))
         .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
       renderClientesTable(window._clientes);
-    });
+    } catch(err) {
+      showToast('Error al cargar clientes: ' + err.message, 'error');
+    }
+  };
+
+  await refrescarClientes();
+
+  // Escucha cambios en tiempo real sin filtro where (evita problema de índices)
+  const unsub = db.collection('clientes').onSnapshot(
+    () => refrescarClientes(),
+    err => console.warn('Clientes listener:', err)
+  );
   App.unsubs.push(unsub);
 }
 
@@ -828,13 +855,30 @@ function loadCreditos() {
     </div>
   `;
 
-  const unsub = db.collection('creditos').orderBy('creado_en', 'desc')
-    .onSnapshot(snap => {
-      window._creditos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      checkVencidos();
+  const refrescarCreditos = async () => {
+    try {
+      const snap = await db.collection('creditos').get();
+      window._creditos = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => {
+          const ta = a.creado_en?.toDate ? a.creado_en.toDate() : new Date(0);
+          const tb = b.creado_en?.toDate ? b.creado_en.toDate() : new Date(0);
+          return tb - ta;
+        });
+      await checkVencidos();
       updateCreditosStats(window._creditos);
       renderCreditosTable(window._creditos);
-    });
+    } catch(err) {
+      showToast('Error al cargar créditos: ' + err.message, 'error');
+    }
+  };
+
+  await refrescarCreditos();
+
+  const unsub = db.collection('creditos').onSnapshot(
+    () => refrescarCreditos(),
+    err => console.warn('Créditos listener:', err)
+  );
   App.unsubs.push(unsub);
 }
 
@@ -1085,11 +1129,26 @@ function loadIngresos() {
     </div>
   `;
 
-  const unsub = db.collection('ingresos').orderBy('fecha', 'desc').limit(300)
-    .onSnapshot(snap => {
-      window._ingresos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const refrescarIngresos = async () => {
+    try {
+      const snap = await db.collection('ingresos').get();
+      window._ingresos = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => {
+          const ta = a.fecha?.toDate ? a.fecha.toDate() : new Date(0);
+          const tb = b.fecha?.toDate ? b.fecha.toDate() : new Date(0);
+          return tb - ta;
+        });
       filterIngresosTable();
-    });
+    } catch(err) {
+      showToast('Error al cargar ingresos: ' + err.message, 'error');
+    }
+  };
+  await refrescarIngresos();
+  const unsub = db.collection('ingresos').onSnapshot(
+    () => refrescarIngresos(),
+    err => console.warn('Ingresos listener:', err)
+  );
   App.unsubs.push(unsub);
 }
 
@@ -1341,11 +1400,26 @@ function loadEgresos() {
     </div>
   `;
 
-  const unsub = db.collection('egresos').orderBy('fecha', 'desc').limit(300)
-    .onSnapshot(snap => {
-      window._egresos = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  const refrescarEgresos = async () => {
+    try {
+      const snap = await db.collection('egresos').get();
+      window._egresos = snap.docs
+        .map(d => ({ id: d.id, ...d.data() }))
+        .sort((a, b) => {
+          const ta = a.fecha?.toDate ? a.fecha.toDate() : new Date(0);
+          const tb = b.fecha?.toDate ? b.fecha.toDate() : new Date(0);
+          return tb - ta;
+        });
       filterEgresosTable();
-    });
+    } catch(err) {
+      showToast('Error al cargar egresos: ' + err.message, 'error');
+    }
+  };
+  await refrescarEgresos();
+  const unsub = db.collection('egresos').onSnapshot(
+    () => refrescarEgresos(),
+    err => console.warn('Egresos listener:', err)
+  );
   App.unsubs.push(unsub);
 }
 
