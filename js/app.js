@@ -401,7 +401,7 @@ async function loadDashboard() {
 // INVENTARIO
 // =============================================
 
-function loadInventario() {
+async function loadInventario() {
   const isAdmin = App.userData.rol === 'admin';
   $id('view-container').innerHTML = `
     <div class="view">
@@ -823,7 +823,7 @@ async function deleteCliente(id, nombre) {
 // CRÉDITOS
 // =============================================
 
-function loadCreditos() {
+async function loadCreditos() {
   $id('view-container').innerHTML = `
     <div class="view">
       <div class="view-header">
@@ -1093,7 +1093,7 @@ async function deleteCredito(id) {
 // INGRESOS
 // =============================================
 
-function loadIngresos() {
+async function loadIngresos() {
   const isAdmin = App.userData.rol === 'admin';
   $id('view-container').innerHTML = `
     <div class="view">
@@ -1363,7 +1363,7 @@ async function deleteIngreso(id) {
 // EGRESOS (Admin only)
 // =============================================
 
-function loadEgresos() {
+async function loadEgresos() {
   $id('view-container').innerHTML = `
     <div class="view">
       <div class="view-header">
