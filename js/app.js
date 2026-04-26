@@ -94,6 +94,14 @@ function dayEnd(dateStr) {
   return d;
 }
 
+// Wrapper con timeout de 12s para evitar que Firestore quede colgado en PC
+function dbGet(ref) {
+  return Promise.race([
+    ref.get(),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('Sin respuesta del servidor. Verifica tu conexión a Internet.')), 12000))
+  ]);
+}
+
 function showToast(msg, type = 'success') {
   const icons = { success: ico.check, error: ico.warn, info: ico.info };
   const c = $id('toast-container');
@@ -359,11 +367,11 @@ async function loadDashboard() {
 
     // Cargar todo con get() simple
     const [prodsSnap, cltsSnap, credsSnap, allIng, allEgr] = await Promise.all([
-      db.collection('productos').get(),
-      db.collection('clientes').get(),
-      db.collection('creditos').get(),
-      db.collection('ingresos').get(),
-      db.collection('egresos').get(),
+      dbGet(db.collection('productos')),
+      dbGet(db.collection('clientes')),
+      dbGet(db.collection('creditos')),
+      dbGet(db.collection('ingresos')),
+      dbGet(db.collection('egresos')),
     ]);
 
     const prods = prodsSnap.docs.filter(d => d.data().activo !== false);
@@ -498,7 +506,7 @@ async function loadInventario() {
   `;
 
   try {
-    const snap = await db.collection('productos').get();
+    const snap = await dbGet(db.collection('productos'));
     window._invProductos = snap.docs
       .filter(d => d.data().activo !== false)
       .map(d => ({ id: d.id, ...d.data() }))
@@ -608,7 +616,7 @@ function showAddProductoModal() {
 }
 
 async function showEditProductoModal(id) {
-  const snap = await db.collection('productos').doc(id).get();
+  const snap = await dbGet(db.collection('productos').doc(id));
   if (!snap.exists) return;
   const p = snap.data();
   openModal('Editar producto', `
@@ -736,7 +744,7 @@ async function loadClientes() {
   `;
 
   try {
-    const snap = await db.collection('clientes').get();
+    const snap = await dbGet(db.collection('clientes'));
     window._clientes = snap.docs
       .filter(d => d.data().activo !== false)
       .map(d => ({ id: d.id, ...d.data() }))
@@ -812,7 +820,7 @@ function showAddClienteModal() {
 }
 
 async function showEditClienteModal(id) {
-  const snap = await db.collection('clientes').doc(id).get();
+  const snap = await dbGet(db.collection('clientes').doc(id));
   if (!snap.exists) return;
   const c = snap.data();
   openModal('Editar cliente', `
@@ -892,7 +900,7 @@ async function loadCreditos() {
   `;
 
   try {
-    const snap = await db.collection('creditos').get();
+    const snap = await dbGet(db.collection('creditos'));
     window._creditos = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
       .sort((a, b) => {
@@ -982,7 +990,7 @@ function renderCreditosTable(creditos) {
 }
 
 async function showAddCreditoModal() {
-  const clientesSnap = await db.collection('clientes').where('activo', '==', true).get();
+  const clientesSnap = await dbGet(db.collection('clientes').where('activo', '==', true));
   const clientes = clientesSnap.docs.sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || ''));
   openModal('Nuevo crédito', `
     <form id="credito-form">
@@ -1082,7 +1090,7 @@ function showRegistrarPagoModal(creditoId, clienteNombre, saldoPendiente) {
 }
 
 async function showHistorialPagosModal(creditoId) {
-  const snap = await db.collection('creditos').doc(creditoId).get();
+  const snap = await dbGet(db.collection('creditos').doc(creditoId));
   if (!snap.exists) return;
   const c = snap.data();
   const pagos = c.pagos || [];
@@ -1154,7 +1162,7 @@ async function loadIngresos() {
   `;
 
   try {
-    const snap = await db.collection('ingresos').get();
+    const snap = await dbGet(db.collection('ingresos'));
     window._ingresos = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
       .sort((a, b) => {
@@ -1218,9 +1226,9 @@ function renderIngresosTable(ingresos) {
 }
 
 async function showAddIngresoModal() {
-  const prodsSnap = await db.collection('productos').where('activo', '==', true).get();
+  const prodsSnap = await dbGet(db.collection('productos').where('activo', '==', true));
   const prods = prodsSnap.docs.sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || ''));
-  const clientesSnap2 = await db.collection('clientes').where('activo', '==', true).get();
+  const clientesSnap2 = await dbGet(db.collection('clientes').where('activo', '==', true));
   const clientes2 = clientesSnap2.docs.sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || ''));
   openModal('Registrar ingreso', `
     <form id="ingreso-form">
@@ -1415,7 +1423,7 @@ async function loadEgresos() {
   `;
 
   try {
-    const snap = await db.collection('egresos').get();
+    const snap = await dbGet(db.collection('egresos'));
     window._egresos = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
       .sort((a, b) => {
@@ -1584,9 +1592,9 @@ async function generarLiquidacion() {
 
   try {
     const [ingSnap, egrSnap, credSnap] = await Promise.all([
-      db.collection('ingresos').where('fecha', '>=', desde).where('fecha', '<=', hasta).orderBy('fecha', 'desc').get(),
-      db.collection('egresos').where('fecha', '>=', desde).where('fecha', '<=', hasta).orderBy('fecha', 'desc').get(),
-      db.collection('creditos').where('estado', '==', 'activo').get(),
+      dbGet(db.collection('ingresos').where('fecha', '>=', desde).where('fecha', '<=', hasta).orderBy('fecha', 'desc')),
+      dbGet(db.collection('egresos').where('fecha', '>=', desde).where('fecha', '<=', hasta).orderBy('fecha', 'desc')),
+      dbGet(db.collection('creditos').where('estado', '==', 'activo')),
     ]);
 
     const ingresos = ingSnap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -1722,8 +1730,8 @@ async function loadNuevaVenta() {
   `;
 
   const [prodsRaw, clientesRaw] = await Promise.all([
-    db.collection('productos').where('activo', '==', true).get(),
-    db.collection('clientes').where('activo', '==', true).get(),
+    dbGet(db.collection('productos').where('activo', '==', true)),
+    dbGet(db.collection('clientes').where('activo', '==', true)),
   ]);
   const prods = { docs: prodsRaw.docs.sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || '')) };
   const clientes = { docs: clientesRaw.docs.sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || '')) };
