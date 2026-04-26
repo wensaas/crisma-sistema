@@ -94,12 +94,14 @@ function dayEnd(dateStr) {
   return d;
 }
 
-// Wrapper con timeout de 12s para evitar que Firestore quede colgado en PC
+// Intenta cache local primero (datos cargados por el dashboard).
+// Si no hay cache, va al servidor con timeout de 15s.
 function dbGet(ref) {
-  return Promise.race([
-    ref.get(),
-    new Promise((_, rej) => setTimeout(() => rej(new Error('Sin respuesta del servidor. Verifica tu conexión a Internet.')), 12000))
-  ]);
+  return ref.get({ source: 'cache' })
+    .catch(() => Promise.race([
+      ref.get(),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('Sin respuesta del servidor. Verifica tu conexión a Internet.')), 15000))
+    ]));
 }
 
 function showToast(msg, type = 'success') {

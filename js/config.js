@@ -9,7 +9,8 @@ const firebaseConfig = {
 
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
-// Forzar HTTP long-polling en lugar de WebSockets/gRPC
-// Los firewalls y antivirus de PC bloquean WebSockets pero no HTTP normal
 db.settings({ experimentalForceLongPolling: true });
+// Persistencia offline: guarda los datos en IndexedDB del navegador.
+// Así los módulos leen del cache local sin nueva petición de red.
+db.enablePersistence({ synchronizeTabs: false }).catch(() => {});
 const auth = firebase.auth();
