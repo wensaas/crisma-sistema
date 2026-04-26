@@ -11,5 +11,5 @@ firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 // Forzar HTTP long-polling en lugar de WebSockets/gRPC
 // Los firewalls y antivirus de PC bloquean WebSockets pero no HTTP normal
-db.settings({ experimentalForceLongPolling: true, merge: true });
+db.settings({ experimentalForceLongPolling: true });
 const auth = firebase.auth();
