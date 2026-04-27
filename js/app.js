@@ -200,10 +200,48 @@ function showLogin() {
   $id('login-screen').classList.remove('hidden');
 }
 
-function showApp() {
+async function showApp() {
   $id('login-screen').classList.add('hidden');
   $id('app').classList.remove('hidden');
   buildSidebar();
+
+  // Mostrar spinner mientras se cargan los datos
+  $id('view-container').innerHTML = `
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:16px">
+      <div class="spinner"></div>
+      <p style="color:var(--text-muted);font-size:14px">Cargando datos del sistema…</p>
+    </div>`;
+
+  try {
+    // UNA SOLA carga al inicio — todos los módulos leen de este cache, sin más peticiones de red
+    const loaded = await Promise.race([
+      Promise.all([
+        db.collection('productos').get(),
+        db.collection('clientes').get(),
+        db.collection('creditos').get(),
+        db.collection('ingresos').get(),
+        db.collection('egresos').get(),
+      ]),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('Tiempo de espera agotado. Verifica tu conexión.')), 20000))
+    ]);
+    const [prodsSnap, cltsSnap, credsSnap, allIng, allEgr] = loaded;
+    window._appData = {
+      productos: prodsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+      clientes:  cltsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+      creditos:  credsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+      ingresos:  allIng.docs.map(d => ({ id: d.id, ...d.data() })),
+      egresos:   allEgr.docs.map(d => ({ id: d.id, ...d.data() })),
+    };
+  } catch(e) {
+    $id('view-container').innerHTML = `
+      <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:60vh;gap:16px;text-align:center;padding:20px">
+        <p style="color:var(--danger);font-size:15px;font-weight:600">Error al cargar datos</p>
+        <p style="color:var(--text-muted);font-size:13px">${e.message}</p>
+        <button class="btn btn-primary" onclick="location.reload()">Reintentar</button>
+      </div>`;
+    return;
+  }
+
   navigate(App.userData.rol === 'cajero' ? 'nueva-venta' : 'dashboard');
 }
 
@@ -303,7 +341,7 @@ $id('confirm-cancel').addEventListener('click', () => $id('confirm-overlay').cla
 // DASHBOARD
 // =============================================
 
-async function loadDashboard() {
+function loadDashboard() {
   $id('view-container').innerHTML = `
     <div class="view">
       <div class="view-header">
@@ -378,7 +416,9 @@ async function loadDashboard() {
     </div>
   `;
 
-  try {
+  // Datos ya cargados en showApp() — solo leer del cache, sin red
+  {
+    const D = window._appData || { productos:[], clientes:[], creditos:[], ingresos:[], egresos:[] };
     const now = new Date();
     const diaInicio = new Date(now); diaInicio.setHours(0,0,0,0);
     const diaFin   = new Date(now); diaFin.setHours(23,59,59,999);
@@ -390,41 +430,22 @@ async function loadDashboard() {
 
     const mesInicio = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    // Cargar todo — este primer batch simultáneo sí atraviesa el firewall en PC
-    const [prodsSnap, cltsSnap, credsSnap, allIng, allEgr] = await Promise.all([
-      dbGet(db.collection('productos')),
-      dbGet(db.collection('clientes')),
-      dbGet(db.collection('creditos')),
-      dbGet(db.collection('ingresos')),
-      dbGet(db.collection('egresos')),
-    ]);
+    const prods       = D.productos.filter(p => p.activo !== false);
+    const clts        = D.clientes.filter(c => c.activo !== false);
+    const credsActivos = D.creditos.filter(c => ['activo','vencido'].includes(c.estado));
 
-    // Guardar en cache JS para que los módulos no necesiten nuevas conexiones de red
-    window._appData = {
-      productos: prodsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
-      clientes:  cltsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
-      creditos:  credsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
-      ingresos:  allIng.docs.map(d => ({ id: d.id, ...d.data() })),
-      egresos:   allEgr.docs.map(d => ({ id: d.id, ...d.data() })),
-    };
-
-    const prods = prodsSnap.docs.filter(d => d.data().activo !== false);
-    const clts  = cltsSnap.docs.filter(d => d.data().activo !== false);
-    const credsActivos = credsSnap.docs.filter(d => ['activo','vencido'].includes(d.data().estado));
-
-    // Helpers de período
-    const enRango = (doc, desde, hasta) => {
-      const f = doc.data().fecha?.toDate ? doc.data().fecha.toDate() : null;
+    const enRango = (item, desde, hasta) => {
+      const f = item.fecha?.toDate ? item.fecha.toDate() : null;
       return f && f >= desde && f <= hasta;
     };
-    const suma = docs => docs.reduce((s, d) => s + (d.data().monto || 0), 0);
+    const suma = arr => arr.reduce((s, i) => s + (i.monto || 0), 0);
 
-    const ingDia = suma(allIng.docs.filter(d => enRango(d, diaInicio, diaFin)));
-    const ingSem = suma(allIng.docs.filter(d => enRango(d, semInicio, diaFin)));
-    const ingMes = suma(allIng.docs.filter(d => enRango(d, mesInicio, diaFin)));
-    const egrDia = suma(allEgr.docs.filter(d => enRango(d, diaInicio, diaFin)));
-    const egrSem = suma(allEgr.docs.filter(d => enRango(d, semInicio, diaFin)));
-    const egrMes = suma(allEgr.docs.filter(d => enRango(d, mesInicio, diaFin)));
+    const ingDia = suma(D.ingresos.filter(i => enRango(i, diaInicio, diaFin)));
+    const ingSem = suma(D.ingresos.filter(i => enRango(i, semInicio, diaFin)));
+    const ingMes = suma(D.ingresos.filter(i => enRango(i, mesInicio, diaFin)));
+    const egrDia = suma(D.egresos.filter(e => enRango(e, diaInicio, diaFin)));
+    const egrSem = suma(D.egresos.filter(e => enRango(e, semInicio, diaFin)));
+    const egrMes = suma(D.egresos.filter(e => enRango(e, mesInicio, diaFin)));
 
     const balColor = n => n >= 0 ? 'var(--teal-dark)' : 'var(--danger)';
     const setVal = (id, val, color) => {
@@ -433,7 +454,7 @@ async function loadDashboard() {
       if (color) el.style.color = color;
     };
 
-    const totalCredPend = credsActivos.reduce((s, d) => s + (d.data().saldo_pendiente || 0), 0);
+    const totalCredPend = credsActivos.reduce((s, c) => s + (c.saldo_pendiente || 0), 0);
 
     setVal('d-productos', prods.length);
     setVal('d-clientes',  clts.length);
@@ -446,17 +467,16 @@ async function loadDashboard() {
     setVal('d-bal-sem', fmtMoney(ingSem-egrSem), balColor(ingSem-egrSem));
     setVal('d-bal-mes', fmtMoney(ingMes-egrMes), balColor(ingMes-egrMes));
 
-    // Actividad reciente
+    // Actividad reciente — leer directo del cache (arrays planos)
     const activities = [
-      ...allIng.docs.map(d => ({ ...d.data(), type: 'income' })),
-      ...allEgr.docs.map(d => ({ ...d.data(), type: 'expense' })),
+      ...D.ingresos.map(i => ({ ...i, type: 'income' })),
+      ...D.egresos.map(e => ({ ...e, type: 'expense' })),
     ].sort((a, b) => {
       const ta = a.fecha?.toDate ? a.fecha.toDate() : new Date(0);
       const tb = b.fecha?.toDate ? b.fecha.toDate() : new Date(0);
       return tb - ta;
     }).slice(0, 8);
 
-    setVal('d-actividad', '');
     $id('d-actividad').innerHTML = activities.length ? activities.map(a => `
       <div class="activity-item">
         <div class="activity-dot ${a.type}">${a.type === 'income' ? '↑' : '↓'}</div>
@@ -470,16 +490,14 @@ async function loadDashboard() {
       </div>
     `).join('') : '<p class="text-muted text-center" style="padding:20px">Sin actividad reciente</p>';
 
-    // Stock bajo
-    const lowStock = prods.filter(d => d.data().stock <= (d.data().stock_minimo || 5));
-    $id('d-stock-bajo').innerHTML = lowStock.length ? lowStock.map(d => {
-      const p = d.data();
-      return `<div class="alert-item">${ico.warn}<div><div class="alert-name">${p.nombre}</div><div class="alert-sub">Stock: ${p.stock} / Mínimo: ${p.stock_minimo||5}</div></div></div>`;
-    }).join('') : '<p class="text-muted text-center" style="padding:20px">Sin alertas de stock</p>';
+    // Stock bajo — array plano
+    const lowStock = prods.filter(p => p.stock <= (p.stock_minimo || 5));
+    $id('d-stock-bajo').innerHTML = lowStock.length ? lowStock.map(p =>
+      `<div class="alert-item">${ico.warn}<div><div class="alert-name">${p.nombre}</div><div class="alert-sub">Stock: ${p.stock} / Mínimo: ${p.stock_minimo||5}</div></div></div>`
+    ).join('') : '<p class="text-muted text-center" style="padding:20px">Sin alertas de stock</p>';
 
-    // Créditos pendientes
-    const credsList = credsActivos.map(d => ({ id: d.id, ...d.data() }))
-      .sort((a, b) => (b.saldo_pendiente||0) - (a.saldo_pendiente||0));
+    // Créditos pendientes — array plano
+    const credsList = [...credsActivos].sort((a, b) => (b.saldo_pendiente||0) - (a.saldo_pendiente||0));
     const estadoBadge = { activo:'badge-info', vencido:'badge-danger', pagado:'badge-success' };
     const badge = $id('d-cred-total-badge');
     if (badge) badge.textContent = 'Total: ' + fmtMoney(totalCredPend);
@@ -494,9 +512,6 @@ async function loadDashboard() {
         <td><button class="btn btn-sm btn-success" onclick="showRegistrarPagoModal('${c.id}','${esc(c.cliente_nombre||'')}',${c.saldo_pendiente||0})">${ico.pay} Registrar abono</button></td>
       </tr>
     `).join('') : '<tr><td colspan="6" class="table-empty">Sin créditos activos</td></tr>';
-
-  } catch(err) {
-    showToast('Error en dashboard: ' + err.message, 'error');
   }
 }
 
@@ -650,10 +665,9 @@ function showAddProductoModal() {
   });
 }
 
-async function showEditProductoModal(id) {
-  const snap = await dbGet(db.collection('productos').doc(id));
-  if (!snap.exists) return;
-  const p = snap.data();
+function showEditProductoModal(id) {
+  const p = window._appData?.productos?.find(x => x.id === id);
+  if (!p) { showToast('Producto no encontrado', 'error'); return; }
   openModal('Editar producto', `
     <form id="producto-form">
       <div class="form-row">
@@ -851,10 +865,9 @@ function showAddClienteModal() {
   });
 }
 
-async function showEditClienteModal(id) {
-  const snap = await dbGet(db.collection('clientes').doc(id));
-  if (!snap.exists) return;
-  const c = snap.data();
+function showEditClienteModal(id) {
+  const c = window._appData?.clientes?.find(x => x.id === id);
+  if (!c) { showToast('Cliente no encontrado', 'error'); return; }
   openModal('Editar cliente', `
     <form id="cliente-form">
       <div class="form-group"><label>Nombre completo *</label><input type="text" id="cf-nombre" value="${esc(c.nombre)}" required /></div>
@@ -1133,10 +1146,9 @@ function showRegistrarPagoModal(creditoId, clienteNombre, saldoPendiente) {
   });
 }
 
-async function showHistorialPagosModal(creditoId) {
-  const snap = await dbGet(db.collection('creditos').doc(creditoId));
-  if (!snap.exists) return;
-  const c = snap.data();
+function showHistorialPagosModal(creditoId) {
+  const c = window._appData?.creditos?.find(x => x.id === creditoId);
+  if (!c) { showToast('Crédito no encontrado', 'error'); return; }
   const pagos = c.pagos || [];
   openModal(`Historial de pagos — ${c.cliente_nombre}`, `
     <p style="margin-bottom:16px">Monto original: <strong>${fmtMoney(c.monto_original)}</strong> · Saldo pendiente: <strong style="color:var(--danger)">${fmtMoney(c.saldo_pendiente)}</strong></p>
@@ -1635,7 +1647,7 @@ function loadLiquidacion() {
   generarLiquidacion();
 }
 
-async function generarLiquidacion() {
+function generarLiquidacion() {
   const desdeStr = $id('liq-desde')?.value || todayStr();
   const hastaStr = $id('liq-hasta')?.value || todayStr();
   const desde = dayStart(desdeStr);
@@ -1645,15 +1657,12 @@ async function generarLiquidacion() {
   res.innerHTML = '<p class="text-muted text-center" style="padding:40px">Generando reporte…</p>';
 
   try {
-    const [ingSnap, egrSnap, credSnap] = await Promise.all([
-      dbGet(db.collection('ingresos').where('fecha', '>=', desde).where('fecha', '<=', hasta).orderBy('fecha', 'desc')),
-      dbGet(db.collection('egresos').where('fecha', '>=', desde).where('fecha', '<=', hasta).orderBy('fecha', 'desc')),
-      dbGet(db.collection('creditos').where('estado', '==', 'activo')),
-    ]);
-
-    const ingresos = ingSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-    const egresos = egrSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-    const creditos = credSnap.docs.map(d => d.data());
+    // Leer del cache — sin peticiones de red adicionales
+    const D = window._appData || { ingresos:[], egresos:[], creditos:[] };
+    const inRango = (item) => { const f = item.fecha?.toDate ? item.fecha.toDate() : null; return f && f >= desde && f <= hasta; };
+    const ingresos = D.ingresos.filter(inRango);
+    const egresos  = D.egresos.filter(inRango);
+    const creditos = D.creditos.filter(c => c.estado === 'activo');
 
     const totalIng = ingresos.reduce((s, i) => s + (i.monto || 0), 0);
     const totalEgr = egresos.reduce((s, e) => s + (e.monto || 0), 0);
@@ -1783,12 +1792,10 @@ async function loadNuevaVenta() {
     </div>
   `;
 
-  const [prodsRaw, clientesRaw] = await Promise.all([
-    dbGet(db.collection('productos').where('activo', '==', true)),
-    dbGet(db.collection('clientes').where('activo', '==', true)),
-  ]);
-  const prods = { docs: prodsRaw.docs.sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || '')) };
-  const clientes = { docs: clientesRaw.docs.sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || '')) };
+  const prodsRaw = await colGet('productos', db.collection('productos').where('activo', '==', true));
+  const clientesRaw = await colGet('clientes', db.collection('clientes').where('activo', '==', true));
+  const prods    = { docs: prodsRaw.docs.filter(d => d.data().activo !== false).sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || '')) };
+  const clientes = { docs: clientesRaw.docs.filter(d => d.data().activo !== false).sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || '')) };
 
   $id('venta-rapida').innerHTML = `
     <form id="vr-form">
@@ -1846,22 +1853,21 @@ async function loadNuevaVenta() {
     const qty = Number($id('vr-qty').value);
     const precio = Number($id('vr-precio').value);
     if (!prodId || !precio) { showToast('Completa todos los campos', 'error'); return; }
+    const nuevoStock = Math.max(0, prodStock - qty);
+    const ingData = {
+      concepto: `Venta: ${prodNombre}`, categoria: 'venta_producto',
+      monto: qty * precio, forma_pago: $id('vr-fpago').value,
+      producto_id: prodId, producto_nombre: prodNombre,
+      cantidad: qty, precio_unitario: precio,
+      registrado_por_uid: App.userData.uid,
+      registrado_por_nombre: App.userData.nombre,
+      fecha: firebase.firestore.Timestamp.fromDate(new Date()),
+    };
     try {
-      await db.collection('ingresos').add({
-        concepto: `Venta: ${prodNombre}`,
-        categoria: 'venta_producto',
-        monto: qty * precio,
-        forma_pago: $id('vr-fpago').value,
-        producto_id: prodId, producto_nombre: prodNombre,
-        cantidad: qty, precio_unitario: precio,
-        registrado_por_uid: App.userData.uid,
-        registrado_por_nombre: App.userData.nombre,
-        fecha: firebase.firestore.Timestamp.fromDate(new Date()),
-      });
-      await db.collection('productos').doc(prodId).update({
-        stock: Math.max(0, prodStock - qty),
-        actualizado_en: firebase.firestore.FieldValue.serverTimestamp(),
-      });
+      const ingRef = await db.collection('ingresos').add(ingData);
+      _cacheAdd('ingresos', ingRef.id, ingData);
+      await db.collection('productos').doc(prodId).update({ stock: nuevoStock, actualizado_en: firebase.firestore.FieldValue.serverTimestamp() });
+      _cacheUpd('productos', prodId, { stock: nuevoStock });
       showToast(`Venta registrada: ${fmtMoney(qty * precio)}`);
       $id('vr-form').reset();
       $id('vr-total').textContent = '$0';
@@ -1876,12 +1882,13 @@ async function loadNuevaVenta() {
     const monto = Number($id('cr-monto').value);
     const vence = $id('cr-vence').value;
     if (!clienteId || !monto || !vence) { showToast('Completa todos los campos', 'error'); return; }
+    const fechaVenc = firebase.firestore.Timestamp.fromDate(dayEnd(vence));
     try {
-      await db.collection('creditos').add({
+      const credRef = await db.collection('creditos').add({
         cliente_id: clienteId, cliente_nombre: clienteNombre,
         monto_original: monto, saldo_pendiente: monto,
         fecha_otorgamiento: firebase.firestore.FieldValue.serverTimestamp(),
-        fecha_vencimiento: firebase.firestore.Timestamp.fromDate(dayEnd(vence)),
+        fecha_vencimiento: fechaVenc,
         estado: 'activo',
         observaciones: $id('cr-obs').value.trim(),
         pagos: [],
@@ -1889,6 +1896,7 @@ async function loadNuevaVenta() {
         creado_por_nombre: App.userData.nombre,
         creado_en: firebase.firestore.FieldValue.serverTimestamp(),
       });
+      _cacheAdd('creditos', credRef.id, { cliente_id: clienteId, cliente_nombre: clienteNombre, monto_original: monto, saldo_pendiente: monto, fecha_vencimiento: fechaVenc, estado: 'activo', pagos: [] });
       showToast(`Crédito creado para ${clienteNombre}`);
       $id('cr-form').reset();
     } catch(err) { showToast('Error: ' + err.message, 'error'); }
