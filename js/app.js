@@ -94,14 +94,37 @@ function dayEnd(dateStr) {
   return d;
 }
 
-// Intenta cache local primero (datos cargados por el dashboard).
-// Si no hay cache, va al servidor con timeout de 15s.
+// Timeout seguro para peticiones Firestore individuales (documentos, modales)
 function dbGet(ref) {
-  return ref.get({ source: 'cache' })
-    .catch(() => Promise.race([
-      ref.get(),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('Sin respuesta del servidor. Verifica tu conexión a Internet.')), 15000))
-    ]));
+  return Promise.race([
+    ref.get(),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('Sin respuesta del servidor. Verifica tu conexión a Internet.')), 15000))
+  ]);
+}
+
+// Para colecciones: sirve desde window._appData (cache JS puro) si el dashboard
+// ya cargó los datos. Evita nuevas conexiones que fallan en PC después del
+// primer batch de peticiones. Si no hay cache, va a Firestore con timeout.
+function colGet(name, ref) {
+  if (window._appData && name in window._appData) {
+    return Promise.resolve({
+      docs: window._appData[name].map(d => ({ id: d.id, data: () => d, exists: true }))
+    });
+  }
+  return dbGet(ref);
+}
+
+// Helpers de cache JS para optimistic updates después de escrituras
+function _cacheAdd(col, id, data) {
+  if (window._appData?.[col]) window._appData[col].push({ id, ...data });
+}
+function _cacheUpd(col, id, data) {
+  if (!window._appData?.[col]) return;
+  const item = window._appData[col].find(d => d.id === id);
+  if (item) Object.assign(item, data);
+}
+function _cacheDel(col, id) {
+  if (window._appData?.[col]) window._appData[col] = window._appData[col].filter(d => d.id !== id);
 }
 
 function showToast(msg, type = 'success') {
@@ -367,7 +390,7 @@ async function loadDashboard() {
 
     const mesInicio = new Date(now.getFullYear(), now.getMonth(), 1);
 
-    // Cargar todo con get() simple
+    // Cargar todo — este primer batch simultáneo sí atraviesa el firewall en PC
     const [prodsSnap, cltsSnap, credsSnap, allIng, allEgr] = await Promise.all([
       dbGet(db.collection('productos')),
       dbGet(db.collection('clientes')),
@@ -375,6 +398,15 @@ async function loadDashboard() {
       dbGet(db.collection('ingresos')),
       dbGet(db.collection('egresos')),
     ]);
+
+    // Guardar en cache JS para que los módulos no necesiten nuevas conexiones de red
+    window._appData = {
+      productos: prodsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+      clientes:  cltsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+      creditos:  credsSnap.docs.map(d => ({ id: d.id, ...d.data() })),
+      ingresos:  allIng.docs.map(d => ({ id: d.id, ...d.data() })),
+      egresos:   allEgr.docs.map(d => ({ id: d.id, ...d.data() })),
+    };
 
     const prods = prodsSnap.docs.filter(d => d.data().activo !== false);
     const clts  = cltsSnap.docs.filter(d => d.data().activo !== false);
@@ -508,7 +540,7 @@ async function loadInventario() {
   `;
 
   try {
-    const snap = await dbGet(db.collection('productos'));
+    const snap = await colGet('productos', db.collection('productos'));
     window._invProductos = snap.docs
       .filter(d => d.data().activo !== false)
       .map(d => ({ id: d.id, ...d.data() }))
@@ -610,7 +642,8 @@ function showAddProductoModal() {
       actualizado_en: firebase.firestore.FieldValue.serverTimestamp(),
     };
     try {
-      await db.collection('productos').add(data);
+      const ref = await db.collection('productos').add(data);
+      _cacheAdd('productos', ref.id, { nombre: data.nombre, categoria: data.categoria, precio_venta: data.precio_venta, precio_costo: data.precio_costo, stock: data.stock, stock_minimo: data.stock_minimo, proveedor: data.proveedor, activo: true });
       showToast('Producto agregado correctamente');
       closeModal(); loadInventario();
     } catch(e) { showToast('Error al guardar: ' + e.message, 'error'); }
@@ -649,16 +682,9 @@ async function showEditProductoModal(id) {
   $id('producto-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      await db.collection('productos').doc(id).update({
-        nombre: $id('pf-nombre').value.trim(),
-        categoria: $id('pf-cat').value.trim(),
-        precio_venta: Number($id('pf-pventa').value),
-        precio_costo: Number($id('pf-pcosto').value) || 0,
-        stock: Number($id('pf-stock').value),
-        stock_minimo: Number($id('pf-stockmin').value) || 5,
-        proveedor: $id('pf-prov').value.trim(),
-        actualizado_en: firebase.firestore.FieldValue.serverTimestamp(),
-      });
+      const upd = { nombre: $id('pf-nombre').value.trim(), categoria: $id('pf-cat').value.trim(), precio_venta: Number($id('pf-pventa').value), precio_costo: Number($id('pf-pcosto').value) || 0, stock: Number($id('pf-stock').value), stock_minimo: Number($id('pf-stockmin').value) || 5, proveedor: $id('pf-prov').value.trim() };
+      await db.collection('productos').doc(id).update({ ...upd, actualizado_en: firebase.firestore.FieldValue.serverTimestamp() });
+      _cacheUpd('productos', id, upd);
       showToast('Producto actualizado');
       closeModal(); loadInventario();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
@@ -704,8 +730,9 @@ function showAjusteStockModal(id, nombre, stockActual) {
         stock: nuevoStock,
         actualizado_en: firebase.firestore.FieldValue.serverTimestamp(),
       });
+      _cacheUpd('productos', id, { stock: nuevoStock });
       showToast(`Stock actualizado a ${nuevoStock}`);
-      closeModal();
+      closeModal(); loadInventario();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
   });
 }
@@ -714,7 +741,8 @@ async function deleteProducto(id, nombre) {
   openConfirm(`¿Eliminar el producto "${nombre}"? Esta acción no se puede deshacer.`, async () => {
     try {
       await db.collection('productos').doc(id).update({ activo: false });
-      showToast('Producto eliminado');
+      _cacheDel('productos', id);
+      showToast('Producto eliminado'); loadInventario();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
   });
 }
@@ -746,7 +774,7 @@ async function loadClientes() {
   `;
 
   try {
-    const snap = await dbGet(db.collection('clientes'));
+    const snap = await colGet('clientes', db.collection('clientes'));
     window._clientes = snap.docs
       .filter(d => d.data().activo !== false)
       .map(d => ({ id: d.id, ...d.data() }))
@@ -805,16 +833,18 @@ function showAddClienteModal() {
   `);
   $id('cliente-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const nombre = $id('cf-nombre').value.trim();
+    const telefono = $id('cf-tel').value.trim();
+    const email = $id('cf-email').value.trim();
+    const direccion = $id('cf-dir').value.trim();
+    const notas = $id('cf-notas').value.trim();
     try {
-      await db.collection('clientes').add({
-        nombre: $id('cf-nombre').value.trim(),
-        telefono: $id('cf-tel').value.trim(),
-        email: $id('cf-email').value.trim(),
-        direccion: $id('cf-dir').value.trim(),
-        notas: $id('cf-notas').value.trim(),
+      const ref = await db.collection('clientes').add({
+        nombre, telefono, email, direccion, notas,
         activo: true,
         creado_en: firebase.firestore.FieldValue.serverTimestamp(),
       });
+      _cacheAdd('clientes', ref.id, { nombre, telefono, email, direccion, notas, activo: true });
       showToast('Cliente agregado');
       closeModal(); loadClientes();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
@@ -842,14 +872,16 @@ async function showEditClienteModal(id) {
   `);
   $id('cliente-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const upd = {
+      nombre: $id('cf-nombre').value.trim(),
+      telefono: $id('cf-tel').value.trim(),
+      email: $id('cf-email').value.trim(),
+      direccion: $id('cf-dir').value.trim(),
+      notas: $id('cf-notas').value.trim(),
+    };
     try {
-      await db.collection('clientes').doc(id).update({
-        nombre: $id('cf-nombre').value.trim(),
-        telefono: $id('cf-tel').value.trim(),
-        email: $id('cf-email').value.trim(),
-        direccion: $id('cf-dir').value.trim(),
-        notas: $id('cf-notas').value.trim(),
-      });
+      await db.collection('clientes').doc(id).update(upd);
+      _cacheUpd('clientes', id, upd);
       showToast('Cliente actualizado');
       closeModal(); loadClientes();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
@@ -860,7 +892,8 @@ async function deleteCliente(id, nombre) {
   openConfirm(`¿Eliminar al cliente "${nombre}"?`, async () => {
     try {
       await db.collection('clientes').doc(id).update({ activo: false });
-      showToast('Cliente eliminado');
+      _cacheDel('clientes', id);
+      showToast('Cliente eliminado'); loadClientes();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
   });
 }
@@ -902,7 +935,7 @@ async function loadCreditos() {
   `;
 
   try {
-    const snap = await dbGet(db.collection('creditos'));
+    const snap = await colGet('creditos', db.collection('creditos'));
     window._creditos = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
       .sort((a, b) => {
@@ -992,8 +1025,8 @@ function renderCreditosTable(creditos) {
 }
 
 async function showAddCreditoModal() {
-  const clientesSnap = await dbGet(db.collection('clientes').where('activo', '==', true));
-  const clientes = clientesSnap.docs.sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || ''));
+  const clientesSnap = await colGet('clientes', db.collection('clientes').where('activo', '==', true));
+  const clientes = clientesSnap.docs.filter(d => d.data().activo !== false).sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || ''));
   openModal('Nuevo crédito', `
     <form id="credito-form">
       <div class="form-group">
@@ -1022,20 +1055,27 @@ async function showAddCreditoModal() {
     const clienteNombre = selEl.options[selEl.selectedIndex]?.dataset.nombre || '';
     const monto = Number($id('crf-monto').value);
     const vencimiento = $id('crf-vencimiento').value;
+    const obs = $id('crf-obs').value.trim();
+    const fechaVenc = firebase.firestore.Timestamp.fromDate(dayEnd(vencimiento));
     try {
-      await db.collection('creditos').add({
+      const ref = await db.collection('creditos').add({
         cliente_id: clienteId,
         cliente_nombre: clienteNombre,
         monto_original: monto,
         saldo_pendiente: monto,
         fecha_otorgamiento: firebase.firestore.FieldValue.serverTimestamp(),
-        fecha_vencimiento: firebase.firestore.Timestamp.fromDate(dayEnd(vencimiento)),
+        fecha_vencimiento: fechaVenc,
         estado: 'activo',
-        observaciones: $id('crf-obs').value.trim(),
+        observaciones: obs,
         pagos: [],
         creado_por_uid: App.userData.uid,
         creado_por_nombre: App.userData.nombre,
         creado_en: firebase.firestore.FieldValue.serverTimestamp(),
+      });
+      _cacheAdd('creditos', ref.id, {
+        cliente_id: clienteId, cliente_nombre: clienteNombre,
+        monto_original: monto, saldo_pendiente: monto,
+        fecha_vencimiento: fechaVenc, estado: 'activo', observaciones: obs, pagos: [],
       });
       showToast('Crédito creado');
       closeModal(); loadCreditos();
@@ -1062,19 +1102,19 @@ function showRegistrarPagoModal(creditoId, clienteNombre, saldoPendiente) {
     const fechaPago = $id('pf-fecha').value;
     const nuevoSaldo = Math.max(0, saldoPendiente - montoPago);
     const nuevoEstado = nuevoSaldo === 0 ? 'pagado' : 'activo';
+    const fechaTS = firebase.firestore.Timestamp.fromDate(parseLocalDate(fechaPago));
+    const notas = $id('pf-notas').value.trim();
     try {
       await db.collection('creditos').doc(creditoId).update({
         saldo_pendiente: nuevoSaldo,
         estado: nuevoEstado,
         pagos: firebase.firestore.FieldValue.arrayUnion({
-          monto: montoPago,
-          fecha: firebase.firestore.Timestamp.fromDate(parseLocalDate(fechaPago)),
-          notas: $id('pf-notas').value.trim(),
+          monto: montoPago, fecha: fechaTS, notas,
           registrado_por: App.userData.nombre,
         }),
       });
-      // Register as income
-      await db.collection('ingresos').add({
+      _cacheUpd('creditos', creditoId, { saldo_pendiente: nuevoSaldo, estado: nuevoEstado });
+      const ingData = {
         concepto: `Pago crédito — ${clienteNombre}`,
         categoria: 'pago_credito',
         monto: montoPago,
@@ -1083,10 +1123,12 @@ function showRegistrarPagoModal(creditoId, clienteNombre, saldoPendiente) {
         credito_id: creditoId,
         registrado_por_uid: App.userData.uid,
         registrado_por_nombre: App.userData.nombre,
-        fecha: firebase.firestore.Timestamp.fromDate(parseLocalDate(fechaPago)),
-      });
+        fecha: fechaTS,
+      };
+      const ingRef = await db.collection('ingresos').add(ingData);
+      _cacheAdd('ingresos', ingRef.id, ingData);
       showToast(nuevoEstado === 'pagado' ? '✅ Crédito saldado' : 'Pago registrado');
-      closeModal();
+      closeModal(); loadCreditos();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
   });
 }
@@ -1118,7 +1160,8 @@ async function deleteCredito(id) {
   openConfirm('¿Eliminar este crédito permanentemente?', async () => {
     try {
       await db.collection('creditos').doc(id).delete();
-      showToast('Crédito eliminado');
+      _cacheDel('creditos', id);
+      showToast('Crédito eliminado'); loadCreditos();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
   });
 }
@@ -1164,7 +1207,7 @@ async function loadIngresos() {
   `;
 
   try {
-    const snap = await dbGet(db.collection('ingresos'));
+    const snap = await colGet('ingresos', db.collection('ingresos'));
     window._ingresos = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
       .sort((a, b) => {
@@ -1228,10 +1271,10 @@ function renderIngresosTable(ingresos) {
 }
 
 async function showAddIngresoModal() {
-  const prodsSnap = await dbGet(db.collection('productos').where('activo', '==', true));
-  const prods = prodsSnap.docs.sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || ''));
-  const clientesSnap2 = await dbGet(db.collection('clientes').where('activo', '==', true));
-  const clientes2 = clientesSnap2.docs.sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || ''));
+  const prodsSnap = await colGet('productos', db.collection('productos').where('activo', '==', true));
+  const prods = prodsSnap.docs.filter(d => d.data().activo !== false).sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || ''));
+  const clientesSnap2 = await colGet('clientes', db.collection('clientes').where('activo', '==', true));
+  const clientes2 = clientesSnap2.docs.filter(d => d.data().activo !== false).sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || ''));
   openModal('Registrar ingreso', `
     <form id="ingreso-form">
       <div class="form-row">
@@ -1310,7 +1353,7 @@ async function showAddIngresoModal() {
         if (!prodId) { showToast('Selecciona un producto', 'error'); return; }
         if (!precio) { showToast('Ingresa el precio', 'error'); return; }
 
-        await db.collection('ingresos').add({
+        const ingData = {
           concepto: `Venta: ${prodNombre}`,
           categoria: 'venta_producto',
           monto,
@@ -1324,7 +1367,9 @@ async function showAddIngresoModal() {
           registrado_por_uid: App.userData.uid,
           registrado_por_nombre: App.userData.nombre,
           fecha,
-        });
+        };
+        const ingRef = await db.collection('ingresos').add(ingData);
+        _cacheAdd('ingresos', ingRef.id, ingData);
 
         if ($id('if-descontar-stock').checked && prodId) {
           const nuevoStock = Math.max(0, prodStock - qty);
@@ -1332,12 +1377,13 @@ async function showAddIngresoModal() {
             stock: nuevoStock,
             actualizado_en: firebase.firestore.FieldValue.serverTimestamp(),
           });
+          _cacheUpd('productos', prodId, { stock: nuevoStock });
         }
       } else {
         const concepto = $id('if-concepto').value.trim();
         const monto = Number($id('if-monto-otro').value);
         if (!concepto || !monto) { showToast('Completa todos los campos', 'error'); return; }
-        await db.collection('ingresos').add({
+        const ingData2 = {
           concepto,
           categoria: 'otro',
           monto,
@@ -1345,7 +1391,9 @@ async function showAddIngresoModal() {
           registrado_por_uid: App.userData.uid,
           registrado_por_nombre: App.userData.nombre,
           fecha,
-        });
+        };
+        const ingRef2 = await db.collection('ingresos').add(ingData2);
+        _cacheAdd('ingresos', ingRef2.id, ingData2);
       }
       showToast('Ingreso registrado');
       closeModal(); loadIngresos();
@@ -1378,7 +1426,8 @@ async function deleteIngreso(id) {
   openConfirm('¿Eliminar este registro de ingreso?', async () => {
     try {
       await db.collection('ingresos').doc(id).delete();
-      showToast('Ingreso eliminado');
+      _cacheDel('ingresos', id);
+      showToast('Ingreso eliminado'); loadIngresos();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
   });
 }
@@ -1425,7 +1474,7 @@ async function loadEgresos() {
   `;
 
   try {
-    const snap = await dbGet(db.collection('egresos'));
+    const snap = await colGet('egresos', db.collection('egresos'));
     window._egresos = snap.docs
       .map(d => ({ id: d.id, ...d.data() }))
       .sort((a, b) => {
@@ -1521,18 +1570,20 @@ function showAddEgresoModal() {
   `);
   $id('egreso-form').addEventListener('submit', async (e) => {
     e.preventDefault();
+    const egData = {
+      concepto: $id('ef-concepto').value.trim(),
+      categoria: $id('ef-cat').value,
+      monto: Number($id('ef-monto').value),
+      forma_pago: $id('ef-fpago').value,
+      proveedor: $id('ef-prov').value.trim(),
+      observaciones: $id('ef-obs').value.trim(),
+      registrado_por_uid: App.userData.uid,
+      registrado_por_nombre: App.userData.nombre,
+      fecha: firebase.firestore.Timestamp.fromDate(parseLocalDate($id('ef-fecha').value)),
+    };
     try {
-      await db.collection('egresos').add({
-        concepto: $id('ef-concepto').value.trim(),
-        categoria: $id('ef-cat').value,
-        monto: Number($id('ef-monto').value),
-        forma_pago: $id('ef-fpago').value,
-        proveedor: $id('ef-prov').value.trim(),
-        observaciones: $id('ef-obs').value.trim(),
-        registrado_por_uid: App.userData.uid,
-        registrado_por_nombre: App.userData.nombre,
-        fecha: firebase.firestore.Timestamp.fromDate(parseLocalDate($id('ef-fecha').value)),
-      });
+      const ref = await db.collection('egresos').add(egData);
+      _cacheAdd('egresos', ref.id, egData);
       showToast('Egreso registrado');
       closeModal(); loadEgresos();
     } catch(err) { showToast('Error: ' + err.message, 'error'); }
@@ -1543,7 +1594,8 @@ async function deleteEgreso(id) {
   openConfirm('¿Eliminar este registro de egreso?', async () => {
     try {
       await db.collection('egresos').doc(id).delete();
-      showToast('Egreso eliminado');
+      _cacheDel('egresos', id);
+      showToast('Egreso eliminado'); loadEgresos();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
   });
 }
