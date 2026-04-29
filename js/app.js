@@ -956,7 +956,7 @@ async function loadCreditos() {
         const tb = b.creado_en?.toDate ? b.creado_en.toDate() : new Date(0);
         return tb - ta;
       });
-    await checkVencidos();
+    if (App.userData.rol === 'admin') await checkVencidos();
     updateCreditosStats(window._creditos);
     renderCreditosTable(window._creditos);
   } catch(err) { showToast('Error: ' + err.message, 'error'); }
@@ -2008,11 +2008,12 @@ async function loadNuevaVenta() {
         estado: 'activo',
         observaciones: $id('cr-obs').value.trim(),
         pagos: [],
+        productos: [],
         creado_por_uid: App.userData.uid,
         creado_por_nombre: App.userData.nombre,
         creado_en: firebase.firestore.FieldValue.serverTimestamp(),
       });
-      _cacheAdd('creditos', credRef.id, { cliente_id: clienteId, cliente_nombre: clienteNombre, monto_original: monto, saldo_pendiente: monto, fecha_vencimiento: fechaVenc, estado: 'activo', pagos: [] });
+      _cacheAdd('creditos', credRef.id, { cliente_id: clienteId, cliente_nombre: clienteNombre, monto_original: monto, saldo_pendiente: monto, fecha_vencimiento: fechaVenc, estado: 'activo', pagos: [], productos: [] });
       showToast(`Crédito creado para ${clienteNombre}`);
       $id('cr-form').reset();
     } catch(err) { showToast('Error: ' + err.message, 'error'); }
