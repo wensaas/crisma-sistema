@@ -1038,8 +1038,17 @@ function renderCreditosTable(creditos) {
 }
 
 async function showAddCreditoModal() {
-  const clientesSnap = await colGet('clientes', db.collection('clientes').where('activo', '==', true));
+  const [clientesSnap, productosSnap] = await Promise.all([
+    colGet('clientes', db.collection('clientes').where('activo', '==', true)),
+    colGet('productos', db.collection('productos')),
+  ]);
   const clientes = clientesSnap.docs.filter(d => d.data().activo !== false).sort((a, b) => (a.data().nombre || '').localeCompare(b.data().nombre || ''));
+  const productos = productosSnap.docs
+    .filter(d => d.data().activo !== false && (d.data().stock || 0) > 0)
+    .map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
+  window._creditoProductos = [];
+  window._productosDisponibles = productos;
   openModal('Nuevo crédito', `
     <form id="credito-form">
       <div class="form-group">
@@ -1053,6 +1062,18 @@ async function showAddCreditoModal() {
       <div class="form-row">
         <div class="form-group"><label>Monto del crédito *</label><div class="input-group"><span class="input-prefix">$</span><input type="number" id="crf-monto" min="1" required /></div></div>
         <div class="form-group"><label>Fecha de vencimiento *</label><input type="date" id="crf-vencimiento" required /></div>
+      </div>
+      <div class="form-group">
+        <label>Productos del crédito <span style="font-weight:400;color:var(--text-muted)">(opcional — descuenta del inventario)</span></label>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <select id="crf-prod-sel" style="flex:1;min-width:180px">
+            <option value="">Selecciona un producto…</option>
+            ${productos.map(p => `<option value="${p.id}" data-nombre="${esc(p.nombre)}" data-stock="${p.stock}" data-precio="${p.precio_venta || 0}">${esc(p.nombre)} (stock: ${p.stock})</option>`).join('')}
+          </select>
+          <input type="number" id="crf-prod-qty" min="1" value="1" style="width:72px" placeholder="Cant." />
+          <button type="button" class="btn btn-secondary" onclick="addCreditoProducto()">Agregar</button>
+        </div>
+        <div id="crf-prod-list" style="margin-top:8px"></div>
       </div>
       <div class="form-group"><label>Observaciones</label><textarea id="crf-obs" rows="2"></textarea></div>
       <div class="form-actions">
@@ -1070,8 +1091,11 @@ async function showAddCreditoModal() {
     const vencimiento = $id('crf-vencimiento').value;
     const obs = $id('crf-obs').value.trim();
     const fechaVenc = firebase.firestore.Timestamp.fromDate(dayEnd(vencimiento));
+    const productosCredito = window._creditoProductos || [];
     try {
-      const ref = await db.collection('creditos').add({
+      const batch = db.batch();
+      const creditoRef = db.collection('creditos').doc();
+      batch.set(creditoRef, {
         cliente_id: clienteId,
         cliente_nombre: clienteNombre,
         monto_original: monto,
@@ -1081,19 +1105,80 @@ async function showAddCreditoModal() {
         estado: 'activo',
         observaciones: obs,
         pagos: [],
+        productos: productosCredito,
         creado_por_uid: App.userData.uid,
         creado_por_nombre: App.userData.nombre,
         creado_en: firebase.firestore.FieldValue.serverTimestamp(),
       });
-      _cacheAdd('creditos', ref.id, {
+      for (const item of productosCredito) {
+        batch.update(db.collection('productos').doc(item.producto_id), {
+          stock: firebase.firestore.FieldValue.increment(-item.cantidad),
+        });
+      }
+      await batch.commit();
+      _cacheAdd('creditos', creditoRef.id, {
         cliente_id: clienteId, cliente_nombre: clienteNombre,
         monto_original: monto, saldo_pendiente: monto,
         fecha_vencimiento: fechaVenc, estado: 'activo', observaciones: obs, pagos: [],
+        productos: productosCredito,
       });
+      for (const item of productosCredito) {
+        _cacheUpd('productos', item.producto_id, { stock: Math.max(0, (window._appData?.productos?.find(p => p.id === item.producto_id)?.stock || 0) - item.cantidad) });
+        const invProd = window._invProductos?.find(p => p.id === item.producto_id);
+        if (invProd) invProd.stock = Math.max(0, (invProd.stock || 0) - item.cantidad);
+      }
       showToast('Crédito creado');
       closeModal(); loadCreditos();
-    } catch(e) { showToast('Error: ' + e.message, 'error'); }
+    } catch(err) { showToast('Error: ' + err.message, 'error'); }
   });
+}
+
+function addCreditoProducto() {
+  const sel = $id('crf-prod-sel');
+  const qtyInput = $id('crf-prod-qty');
+  const prodId = sel.value;
+  if (!prodId) { showToast('Selecciona un producto', 'error'); return; }
+  const opt = sel.options[sel.selectedIndex];
+  const nombre = opt.dataset.nombre;
+  const stockDisp = Number(opt.dataset.stock);
+  const precio = Number(opt.dataset.precio);
+  const qty = Math.max(1, Number(qtyInput.value) || 1);
+  const yaAgregado = window._creditoProductos.find(p => p.producto_id === prodId);
+  const qtyTotal = (yaAgregado?.cantidad || 0) + qty;
+  if (qtyTotal > stockDisp) {
+    showToast(`Stock insuficiente (disponible: ${stockDisp})`, 'error');
+    return;
+  }
+  if (yaAgregado) {
+    yaAgregado.cantidad = qtyTotal;
+  } else {
+    window._creditoProductos.push({ producto_id: prodId, nombre, cantidad: qty, precio_venta: precio });
+  }
+  renderCreditoProductosList();
+  sel.value = '';
+  qtyInput.value = 1;
+}
+
+function removeCreditoProducto(prodId) {
+  window._creditoProductos = window._creditoProductos.filter(p => p.producto_id !== prodId);
+  renderCreditoProductosList();
+}
+
+function renderCreditoProductosList() {
+  const list = $id('crf-prod-list');
+  if (!list) return;
+  if (!window._creditoProductos.length) {
+    list.innerHTML = '<p style="font-size:13px;color:var(--text-muted);margin:4px 0">Sin productos agregados</p>';
+    return;
+  }
+  list.innerHTML = '<div class="pagos-list">' +
+    window._creditoProductos.map(p => `
+      <div class="pago-item" style="display:flex;justify-content:space-between;align-items:center">
+        <div><strong>${p.nombre}</strong> &times; ${p.cantidad}</div>
+        <button type="button" class="btn-icon danger" title="Quitar" onclick="removeCreditoProducto('${p.producto_id}')">${ico.trash}</button>
+      </div>
+    `).join('') +
+    '</div>';
 }
 
 function showRegistrarPagoModal(creditoId, clienteNombre, saldoPendiente) {
@@ -1147,11 +1232,23 @@ function showRegistrarPagoModal(creditoId, clienteNombre, saldoPendiente) {
 }
 
 function showHistorialPagosModal(creditoId) {
-  const c = window._appData?.creditos?.find(x => x.id === creditoId);
+  const c = window._creditos?.find(x => x.id === creditoId) || window._appData?.creditos?.find(x => x.id === creditoId);
   if (!c) { showToast('Crédito no encontrado', 'error'); return; }
   const pagos = c.pagos || [];
-  openModal(`Historial de pagos — ${c.cliente_nombre}`, `
+  const prods = c.productos || [];
+  openModal(`Detalle del crédito — ${c.cliente_nombre}`, `
     <p style="margin-bottom:16px">Monto original: <strong>${fmtMoney(c.monto_original)}</strong> · Saldo pendiente: <strong style="color:var(--danger)">${fmtMoney(c.saldo_pendiente)}</strong></p>
+    ${prods.length ? `
+      <h4 style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Productos entregados</h4>
+      <div class="pagos-list" style="margin-bottom:20px">
+        ${prods.map(p => `
+          <div class="pago-item">
+            <div><strong>${p.nombre}</strong> &times; ${p.cantidad}</div>
+          </div>
+        `).join('')}
+      </div>
+    ` : ''}
+    <h4 style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Historial de abonos</h4>
     <div class="pagos-list">
       ${pagos.length ? pagos.sort((a, b) => {
         const ta = a.fecha?.toDate ? a.fecha.toDate() : new Date(0);
@@ -1162,7 +1259,7 @@ function showHistorialPagosModal(creditoId) {
           <div><strong>${fmtMoney(p.monto)}</strong>${p.notas ? ` — <span style="color:var(--text-muted)">${p.notas}</span>` : ''}</div>
           <div style="font-size:12px;color:var(--text-muted)">${fmtDate(p.fecha)} · ${p.registrado_por || ''}</div>
         </div>
-      `).join('') : '<p class="text-muted text-center">Sin pagos registrados</p>'}
+      `).join('') : '<p class="text-muted text-center">Sin abonos registrados</p>'}
     </div>
     <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal()">Cerrar</button></div>
   `);
