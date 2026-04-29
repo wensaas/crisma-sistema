@@ -1074,7 +1074,7 @@ async function showAddCreditoModal() {
       <div class="form-row">
         <div class="form-group">
           <label>Monto del crédito *</label>
-          <div class="input-group"><span class="input-prefix">$</span><input type="number" id="crf-monto" min="1" placeholder="Auto o manual…" /></div>
+          <div class="input-group"><span class="input-prefix">$</span><input type="number" id="crf-monto" min="0" step="any" placeholder="Auto o manual…" /></div>
           <div class="form-hint">Se calcula al agregar productos o ingrésalo manualmente.</div>
         </div>
         <div class="form-group"><label>Fecha de vencimiento *</label><input type="date" id="crf-vencimiento" required /></div>
@@ -1091,12 +1091,14 @@ async function showAddCreditoModal() {
     const selEl = $id('crf-cliente');
     const clienteId = selEl.value;
     const clienteNombre = selEl.options[selEl.selectedIndex]?.dataset.nombre || '';
-    const monto = Number($id('crf-monto').value);
-    if (!monto || monto <= 0) { showToast('Ingresa el monto del crédito o agrega productos', 'error'); return; }
+    const productosCredito = window._creditoProductos || [];
+    const montoInput = Number($id('crf-monto').value) || 0;
+    const montoProds = productosCredito.reduce((s, p) => s + (p.precio_venta || 0) * p.cantidad, 0);
+    const monto = montoInput > 0 ? montoInput : montoProds;
+    if (!monto || monto <= 0) { showToast('Ingresa el monto del crédito o agrega productos con precio', 'error'); return; }
     const vencimiento = $id('crf-vencimiento').value;
     const obs = $id('crf-obs').value.trim();
     const fechaVenc = firebase.firestore.Timestamp.fromDate(dayEnd(vencimiento));
-    const productosCredito = window._creditoProductos || [];
     try {
       const batch = db.batch();
       const creditoRef = db.collection('creditos').doc();
