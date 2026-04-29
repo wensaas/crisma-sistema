@@ -1059,10 +1059,6 @@ async function showAddCreditoModal() {
         </select>
         <div class="form-hint">¿No está el cliente? <a href="#" onclick="navigate('clientes')" style="color:var(--blue)">Agrégalo primero</a></div>
       </div>
-      <div class="form-row">
-        <div class="form-group"><label>Monto del crédito *</label><div class="input-group"><span class="input-prefix">$</span><input type="number" id="crf-monto" min="1" required /></div></div>
-        <div class="form-group"><label>Fecha de vencimiento *</label><input type="date" id="crf-vencimiento" required /></div>
-      </div>
       <div class="form-group">
         <label>Productos del crédito <span style="font-weight:400;color:var(--text-muted)">(opcional — descuenta del inventario)</span></label>
         <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
@@ -1074,6 +1070,14 @@ async function showAddCreditoModal() {
           <button type="button" class="btn btn-secondary" onclick="addCreditoProducto()">Agregar</button>
         </div>
         <div id="crf-prod-list" style="margin-top:8px"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Monto del crédito *</label>
+          <div class="input-group"><span class="input-prefix">$</span><input type="number" id="crf-monto" min="1" placeholder="Auto o manual…" /></div>
+          <div class="form-hint">Se calcula al agregar productos o ingrésalo manualmente.</div>
+        </div>
+        <div class="form-group"><label>Fecha de vencimiento *</label><input type="date" id="crf-vencimiento" required /></div>
       </div>
       <div class="form-group"><label>Observaciones</label><textarea id="crf-obs" rows="2"></textarea></div>
       <div class="form-actions">
@@ -1088,6 +1092,7 @@ async function showAddCreditoModal() {
     const clienteId = selEl.value;
     const clienteNombre = selEl.options[selEl.selectedIndex]?.dataset.nombre || '';
     const monto = Number($id('crf-monto').value);
+    if (!monto || monto <= 0) { showToast('Ingresa el monto del crédito o agrega productos', 'error'); return; }
     const vencimiento = $id('crf-vencimiento').value;
     const obs = $id('crf-obs').value.trim();
     const fechaVenc = firebase.firestore.Timestamp.fromDate(dayEnd(vencimiento));
@@ -1154,13 +1159,20 @@ function addCreditoProducto() {
   } else {
     window._creditoProductos.push({ producto_id: prodId, nombre, cantidad: qty, precio_venta: precio });
   }
-  renderCreditoProductosList();
+  _recalcCreditoMonto();
   sel.value = '';
   qtyInput.value = 1;
 }
 
 function removeCreditoProducto(prodId) {
   window._creditoProductos = window._creditoProductos.filter(p => p.producto_id !== prodId);
+  _recalcCreditoMonto();
+}
+
+function _recalcCreditoMonto() {
+  const total = (window._creditoProductos || []).reduce((sum, p) => sum + (p.precio_venta || 0) * p.cantidad, 0);
+  const input = $id('crf-monto');
+  if (input) input.value = total > 0 ? total : '';
   renderCreditoProductosList();
 }
 
@@ -1171,13 +1183,18 @@ function renderCreditoProductosList() {
     list.innerHTML = '<p style="font-size:13px;color:var(--text-muted);margin:4px 0">Sin productos agregados</p>';
     return;
   }
+  const total = window._creditoProductos.reduce((sum, p) => sum + (p.precio_venta || 0) * p.cantidad, 0);
   list.innerHTML = '<div class="pagos-list">' +
     window._creditoProductos.map(p => `
       <div class="pago-item" style="display:flex;justify-content:space-between;align-items:center">
-        <div><strong>${p.nombre}</strong> &times; ${p.cantidad}</div>
+        <div>
+          <strong>${p.nombre}</strong> &times; ${p.cantidad}
+          <span style="font-size:12px;color:var(--text-muted);margin-left:6px">${fmtMoney(p.precio_venta)} c/u = ${fmtMoney(p.precio_venta * p.cantidad)}</span>
+        </div>
         <button type="button" class="btn-icon danger" title="Quitar" onclick="removeCreditoProducto('${p.producto_id}')">${ico.trash}</button>
       </div>
     `).join('') +
+    `<div style="text-align:right;font-size:13px;font-weight:600;padding:6px 0;border-top:1px solid var(--border);margin-top:4px">Total: ${fmtMoney(total)}</div>` +
     '</div>';
 }
 
