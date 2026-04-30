@@ -1253,34 +1253,64 @@ function showRegistrarPagoModal(creditoId, clienteNombre, saldoPendiente) {
 function showHistorialPagosModal(creditoId) {
   const c = window._creditos?.find(x => x.id === creditoId) || window._appData?.creditos?.find(x => x.id === creditoId);
   if (!c) { showToast('Crédito no encontrado', 'error'); return; }
-  const pagos = c.pagos || [];
+  const pagos = (c.pagos || []).slice().sort((a, b) => {
+    const ta = a.fecha?.toDate ? a.fecha.toDate() : new Date(0);
+    const tb = b.fecha?.toDate ? b.fecha.toDate() : new Date(0);
+    return tb - ta;
+  });
   const prods = c.productos || [];
+  const totalProds = prods.reduce((s, p) => s + (p.precio_venta || 0) * (p.cantidad || 1), 0);
+  const totalAbonado = pagos.reduce((s, p) => s + (p.monto || 0), 0);
+
   openModal(`Detalle del crédito — ${c.cliente_nombre}`, `
-    <p style="margin-bottom:16px">Monto original: <strong>${fmtMoney(c.monto_original)}</strong> · Saldo pendiente: <strong style="color:var(--danger)">${fmtMoney(c.saldo_pendiente)}</strong></p>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:20px">
+      <div style="background:var(--bg);border-radius:8px;padding:10px 12px;text-align:center">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Monto original</div>
+        <div style="font-size:16px;font-weight:700;color:var(--navy)">${fmtMoney(c.monto_original)}</div>
+      </div>
+      <div style="background:var(--bg);border-radius:8px;padding:10px 12px;text-align:center">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Total abonado</div>
+        <div style="font-size:16px;font-weight:700;color:var(--teal-dark)">${fmtMoney(totalAbonado)}</div>
+      </div>
+      <div style="background:var(--bg);border-radius:8px;padding:10px 12px;text-align:center">
+        <div style="font-size:11px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">Saldo pendiente</div>
+        <div style="font-size:16px;font-weight:700;color:var(--danger)">${fmtMoney(c.saldo_pendiente)}</div>
+      </div>
+    </div>
+
     ${prods.length ? `
       <h4 style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Productos entregados</h4>
-      <div class="pagos-list" style="margin-bottom:20px">
+      <div class="pagos-list" style="margin-bottom:6px">
         ${prods.map(p => `
-          <div class="pago-item">
-            <div><strong>${p.nombre}</strong> &times; ${p.cantidad}</div>
+          <div class="pago-item" style="display:flex;justify-content:space-between;align-items:center">
+            <div>
+              <strong>${p.nombre}</strong>
+              <span style="font-size:12px;color:var(--text-muted);margin-left:6px">&times; ${p.cantidad} &mdash; ${fmtMoney(p.precio_venta || 0)} c/u</span>
+            </div>
+            <strong style="color:var(--navy)">${fmtMoney((p.precio_venta || 0) * (p.cantidad || 1))}</strong>
           </div>
         `).join('')}
-      </div>
-    ` : ''}
-    <h4 style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Historial de abonos</h4>
-    <div class="pagos-list">
-      ${pagos.length ? pagos.sort((a, b) => {
-        const ta = a.fecha?.toDate ? a.fecha.toDate() : new Date(0);
-        const tb = b.fecha?.toDate ? b.fecha.toDate() : new Date(0);
-        return tb - ta;
-      }).map(p => `
-        <div class="pago-item">
-          <div><strong>${fmtMoney(p.monto)}</strong>${p.notas ? ` — <span style="color:var(--text-muted)">${p.notas}</span>` : ''}</div>
-          <div style="font-size:12px;color:var(--text-muted)">${fmtDate(p.fecha)} · ${p.registrado_por || ''}</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0 2px;border-top:1px solid var(--border);margin-top:4px;font-size:13px">
+          <span style="color:var(--text-muted)">Total productos</span>
+          <strong style="color:var(--navy)">${fmtMoney(totalProds)}</strong>
         </div>
-      `).join('') : '<p class="text-muted text-center">Sin abonos registrados</p>'}
+      </div>
+      <div style="margin-bottom:20px"></div>
+    ` : ''}
+
+    <h4 style="font-size:13px;font-weight:600;margin-bottom:8px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.5px">Abonos registrados</h4>
+    <div class="pagos-list">
+      ${pagos.length ? pagos.map(p => `
+        <div class="pago-item" style="display:flex;justify-content:space-between;align-items:flex-start">
+          <div>
+            <strong style="color:var(--teal-dark)">${fmtMoney(p.monto)}</strong>
+            ${p.notas ? `<span style="font-size:12px;color:var(--text-muted);margin-left:6px">${p.notas}</span>` : ''}
+            <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${fmtDate(p.fecha)}${p.registrado_por ? ` · ${p.registrado_por}` : ''}</div>
+          </div>
+        </div>
+      `).join('') : '<p style="color:var(--text-muted);text-align:center;font-size:13px;padding:12px 0">Sin abonos registrados</p>'}
     </div>
-    <div class="form-actions"><button class="btn btn-secondary" onclick="closeModal()">Cerrar</button></div>
+    <div class="form-actions" style="margin-top:16px"><button class="btn btn-secondary" onclick="closeModal()">Cerrar</button></div>
   `);
 }
 
