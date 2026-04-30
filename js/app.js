@@ -390,6 +390,43 @@ function loadDashboard() {
         </div>
       </div>
 
+      ${App.userData.rol === 'admin' ? `
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-header">
+          <h3>${ico.liquidacion} Resumen de capital</h3>
+          <span style="font-size:12px;color:var(--text-muted);font-weight:400">Solo visible para administrador</span>
+        </div>
+        <div style="padding:16px 20px 20px">
+          <div class="stat-grid" style="grid-template-columns:repeat(4,1fr)">
+            <div class="stat-card">
+              <div class="stat-icon danger">${ico.egresos}</div>
+              <div class="stat-label">Capital invertido</div>
+              <div class="stat-value" id="d-cap-invertido" style="color:var(--danger)">…</div>
+              <div class="stat-sub">Costo total del inventario actual</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon teal">${ico.ingresos}</div>
+              <div class="stat-label">Ingresos brutos</div>
+              <div class="stat-value" id="d-cap-bruto" style="color:var(--teal-dark)">…</div>
+              <div class="stat-sub">Total recibido (historial completo)</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon navy">${ico.check}</div>
+              <div class="stat-label">Ingresos netos</div>
+              <div class="stat-value" id="d-cap-neto">…</div>
+              <div class="stat-sub">Bruto menos todos los egresos</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-icon blue">${ico.inventario}</div>
+              <div class="stat-label">Potencial máximo</div>
+              <div class="stat-value" id="d-cap-potencial" style="color:var(--navy)">…</div>
+              <div class="stat-sub">Si se vende todo el inventario</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      ` : ''}
+
       <div class="dashboard-grid">
         <div class="card">
           <div class="card-header"><h3>Actividad reciente</h3></div>
@@ -466,6 +503,18 @@ function loadDashboard() {
     setVal('d-bal-dia', fmtMoney(ingDia-egrDia), balColor(ingDia-egrDia));
     setVal('d-bal-sem', fmtMoney(ingSem-egrSem), balColor(ingSem-egrSem));
     setVal('d-bal-mes', fmtMoney(ingMes-egrMes), balColor(ingMes-egrMes));
+
+    if (App.userData.rol === 'admin') {
+      const capitalInvertido = prods.reduce((s, p) => s + (p.precio_costo || 0) * (p.stock || 0), 0);
+      const ingresosBrutos   = D.ingresos.reduce((s, i) => s + (i.monto || 0), 0);
+      const egresosTotal     = D.egresos.reduce((s, e) => s + (e.monto || 0), 0);
+      const ingresosNetos    = ingresosBrutos - egresosTotal;
+      const potencialMaximo  = prods.reduce((s, p) => s + (p.precio_venta || 0) * (p.stock || 0), 0);
+      setVal('d-cap-invertido', fmtMoney(capitalInvertido));
+      setVal('d-cap-bruto',     fmtMoney(ingresosBrutos));
+      setVal('d-cap-neto',      fmtMoney(ingresosNetos), balColor(ingresosNetos));
+      setVal('d-cap-potencial', fmtMoney(potencialMaximo));
+    }
 
     // Actividad reciente — leer directo del cache (arrays planos)
     const activities = [
