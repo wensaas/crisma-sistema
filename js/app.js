@@ -346,6 +346,7 @@ function loadDashboard() {
     <div class="view">
       <div class="view-header">
         <div class="view-header-left"><h2>Dashboard</h2><p>Resumen general de Tienda Crisma</p></div>
+        ${App.userData.rol === 'admin' ? `<button class="btn btn-danger" onclick="showResetDataModal()">${ico.trash} Limpiar datos</button>` : ''}
       </div>
       <div class="stat-grid" style="grid-template-columns:repeat(4,1fr);margin-bottom:20px">
         <div class="stat-card stat-clickable" onclick="navigate('inventario')"><div class="stat-icon navy">${ico.inventario}</div><div class="stat-label">Productos</div><div class="stat-value" id="d-productos">…</div></div>
@@ -2147,6 +2148,78 @@ function vrCalc() {
   const precio = Number($id('vr-precio')?.value || 0);
   const el = $id('vr-total');
   if (el) el.textContent = fmtMoney(qty * precio);
+}
+
+// =============================================
+// RESET / LIMPIAR DATOS
+// =============================================
+
+function showResetDataModal() {
+  const CONFIRM_TEXT = 'BORRAR TODO';
+  openModal('Limpiar todos los datos', `
+    <div style="background:#fff5f5;border:1px solid var(--danger);border-radius:8px;padding:14px 16px;margin-bottom:18px">
+      <p style="color:var(--danger);font-weight:700;margin:0 0 8px">${ico.warn} Esta acción es irreversible</p>
+      <p style="font-size:13px;color:var(--text);margin:0">Se eliminarán permanentemente <strong>todos</strong> los registros de:</p>
+      <ul style="font-size:13px;margin:8px 0 0 0;padding-left:18px;color:var(--text)">
+        <li>Productos e inventario</li>
+        <li>Clientes</li>
+        <li>Créditos</li>
+        <li>Ingresos</li>
+        <li>Egresos</li>
+      </ul>
+      <p style="font-size:13px;color:var(--text-muted);margin:8px 0 0">Los usuarios del sistema <strong>no</strong> se eliminan.</p>
+    </div>
+    <div class="form-group">
+      <label>Para confirmar, escribe <strong style="color:var(--danger);letter-spacing:1px">${CONFIRM_TEXT}</strong> en el campo de abajo:</label>
+      <input type="text" id="reset-confirm-input" placeholder="${CONFIRM_TEXT}" autocomplete="off" oninput="
+        const match = this.value === '${CONFIRM_TEXT}';
+        document.getElementById('reset-confirm-btn').disabled = !match;
+        document.getElementById('reset-confirm-btn').style.opacity = match ? '1' : '0.4';
+      " style="font-family:monospace;letter-spacing:1px" />
+    </div>
+    <div class="form-actions">
+      <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+      <button type="button" id="reset-confirm-btn" class="btn btn-danger" disabled style="opacity:0.4" onclick="resetAllData()">${ico.trash} Eliminar todo</button>
+    </div>
+  `);
+  setTimeout(() => $id('reset-confirm-input')?.focus(), 100);
+}
+
+async function resetAllData() {
+  closeModal();
+  showToast('Eliminando datos…', 'info');
+  try {
+    await Promise.all([
+      _deleteCollection('productos'),
+      _deleteCollection('clientes'),
+      _deleteCollection('creditos'),
+      _deleteCollection('ingresos'),
+      _deleteCollection('egresos'),
+    ]);
+    window._appData = { productos: [], clientes: [], creditos: [], ingresos: [], egresos: [] };
+    window._invProductos = [];
+    window._clientes = [];
+    window._ingresos = [];
+    showToast('Todos los datos fueron eliminados', 'success');
+    navigate('dashboard');
+  } catch(e) {
+    showToast('Error al eliminar: ' + e.message, 'error');
+  }
+}
+
+async function _deleteCollection(colName) {
+  const snap = await db.collection(colName).get();
+  if (snap.empty) return;
+  let batch = db.batch();
+  let n = 0;
+  const commits = [];
+  snap.docs.forEach(doc => {
+    batch.delete(doc.ref);
+    n++;
+    if (n === 499) { commits.push(batch.commit()); batch = db.batch(); n = 0; }
+  });
+  if (n > 0) commits.push(batch.commit());
+  await Promise.all(commits);
 }
 
 // =============================================
