@@ -593,10 +593,10 @@ async function loadInventario() {
           <table>
             <thead><tr>
               <th>Producto</th><th>Categoría</th><th>Stock</th>
-              <th>Precio venta</th><th>Precio costo</th><th>Proveedor</th>
+              <th>Precio venta</th><th>Precio costo</th><th>Ganancia/u</th><th>Proveedor</th>
               ${isAdmin ? '<th>Acciones</th>' : ''}
             </tr></thead>
-            <tbody id="inv-tbody"><tr><td colspan="7" class="table-empty">Cargando…</td></tr></tbody>
+            <tbody id="inv-tbody"><tr><td colspan="${isAdmin ? 8 : 7}" class="table-empty">Cargando…</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -640,11 +640,12 @@ function renderInventarioTable(productos) {
   const tbody = $id('inv-tbody');
   if (!tbody) return;
   if (!productos.length) {
-    tbody.innerHTML = `<tr><td colspan="7" class="table-empty">${ico.inventario}<br>Sin productos</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="${isAdmin ? 8 : 7}" class="table-empty">${ico.inventario}<br>Sin productos</td></tr>`;
     return;
   }
   tbody.innerHTML = productos.map(p => {
     const lowStock = p.stock <= (p.stock_minimo || 5);
+    const ganancia = (p.precio_venta || 0) - (p.precio_costo || 0);
     return `<tr>
       <td><strong>${p.nombre}</strong></td>
       <td>${p.categoria || '—'}</td>
@@ -654,6 +655,7 @@ function renderInventarioTable(productos) {
       </td>
       <td>${fmtMoney(p.precio_venta)}</td>
       <td>${fmtMoney(p.precio_costo)}</td>
+      <td style="font-weight:600;color:${ganancia > 0 ? 'var(--teal-dark)' : 'var(--danger)'};">${fmtMoney(ganancia)}</td>
       <td>${p.proveedor || '—'}</td>
       ${isAdmin ? `<td style="white-space:nowrap">
         <button class="btn-icon" title="Ajustar stock" onclick="showAjusteStockModal('${p.id}','${esc(p.nombre)}',${p.stock})">${ico.inventario}</button>
@@ -1499,7 +1501,7 @@ async function showAddIngresoModal() {
           <label>Producto *</label>
           <select id="if-producto" onchange="autoFillPrecio()">
             <option value="">Selecciona producto…</option>
-            ${prods.map(d => `<option value="${d.id}" data-precio="${d.data().precio_venta}" data-nombre="${esc(d.data().nombre)}" data-stock="${d.data().stock}">${d.data().nombre} (stock: ${d.data().stock})</option>`).join('')}
+            ${prods.map(d => `<option value="${d.id}" data-precio="${d.data().precio_venta}" data-costo="${d.data().precio_costo||0}" data-nombre="${esc(d.data().nombre)}" data-stock="${d.data().stock}">${d.data().nombre} (stock: ${d.data().stock})</option>`).join('')}
           </select>
         </div>
         <div class="form-row">
@@ -1552,6 +1554,7 @@ async function showAddIngresoModal() {
         const prodStock = Number(prodEl.options[prodEl.selectedIndex]?.dataset.stock || 0);
         const qty = Number($id('if-cantidad').value);
         const precio = Number($id('if-precio').value);
+        const costo = Number(prodEl.options[prodEl.selectedIndex]?.dataset.costo || 0);
         const monto = qty * precio;
         const clienteEl = $id('if-cliente-venta');
         const clienteId = clienteEl.value;
@@ -1571,6 +1574,7 @@ async function showAddIngresoModal() {
           producto_nombre: prodNombre,
           cantidad: qty,
           precio_unitario: precio,
+          precio_costo_unitario: costo,
           registrado_por_uid: App.userData.uid,
           registrado_por_nombre: App.userData.nombre,
           fecha,
@@ -1864,6 +1868,12 @@ function generarLiquidacion() {
     const balance = totalIng - totalEgr;
     const totalCredPendiente = creditos.reduce((s, c) => s + (c.saldo_pendiente || 0), 0);
 
+    const ventas = ingresos.filter(i => i.categoria === 'venta_producto');
+    const totalVentas = ventas.reduce((s, i) => s + (i.monto || 0), 0);
+    const costoVentas = ventas.reduce((s, i) => s + ((i.precio_costo_unitario || 0) * (i.cantidad || 0)), 0);
+    const gananciaBruta = totalVentas - costoVentas;
+    const hayCostos = costoVentas > 0;
+
     // Group by category
     const ingPorCat = {};
     ingresos.forEach(i => { ingPorCat[i.categoria || 'otro'] = (ingPorCat[i.categoria || 'otro'] || 0) + (i.monto || 0); });
@@ -1871,6 +1881,30 @@ function generarLiquidacion() {
     egresos.forEach(e => { egrPorCat[e.categoria || 'Otros'] = (egrPorCat[e.categoria || 'Otros'] || 0) + (e.monto || 0); });
 
     res.innerHTML = `
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-header"><h3>${ico.ingresos} Ventas del período — ${ventas.length} transacciones</h3></div>
+        <div class="card-body" style="padding:16px 20px">
+          <div class="report-summary" style="margin:0">
+            <div class="report-card income">
+              <div class="rc-label">Ingresos brutos</div>
+              <div class="rc-value">${fmtMoney(totalVentas)}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:4px">precio venta × cantidad</div>
+            </div>
+            <div class="report-card expense">
+              <div class="rc-label">Costo de ventas</div>
+              <div class="rc-value">${fmtMoney(costoVentas)}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${hayCostos && totalVentas > 0 ? Math.round(costoVentas / totalVentas * 100) + '% del bruto' : 'sin datos de costo'}</div>
+            </div>
+            <div class="report-card balance">
+              <div class="rc-label">Ingresos netos</div>
+              <div class="rc-value" style="color:${gananciaBruta >= 0 ? 'var(--teal-dark)' : 'var(--danger)'}">${fmtMoney(gananciaBruta)}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:4px">${hayCostos && totalVentas > 0 ? 'margen ' + Math.round(gananciaBruta / totalVentas * 100) + '%' : 'brutos − costo'}</div>
+            </div>
+          </div>
+          ${!hayCostos && ventas.length > 0 ? `<p style="font-size:12px;color:var(--text-muted);margin:12px 0 0;padding-top:10px;border-top:1px solid var(--border)">${ico.info} Las ventas anteriores no tienen precio de costo registrado. El costo se guardará automáticamente en nuevas ventas.</p>` : ''}
+        </div>
+      </div>
+
       <div class="report-summary">
         <div class="report-card income">
           <div class="rc-label">Total ingresos</div>
@@ -1998,7 +2032,7 @@ async function loadNuevaVenta() {
         <label>Producto *</label>
         <select id="vr-prod" onchange="vrAutoFill()" required>
           <option value="">Selecciona…</option>
-          ${prods.docs.map(d => `<option value="${d.id}" data-precio="${d.data().precio_venta}" data-nombre="${esc(d.data().nombre)}" data-stock="${d.data().stock}">${d.data().nombre} — stock: ${d.data().stock}</option>`).join('')}
+          ${prods.docs.map(d => `<option value="${d.id}" data-precio="${d.data().precio_venta}" data-costo="${d.data().precio_costo||0}" data-nombre="${esc(d.data().nombre)}" data-stock="${d.data().stock}">${d.data().nombre} — stock: ${d.data().stock}</option>`).join('')}
         </select>
       </div>
       <div class="form-row">
@@ -2047,6 +2081,7 @@ async function loadNuevaVenta() {
     const prodStock = Number(prodEl.options[prodEl.selectedIndex]?.dataset.stock || 0);
     const qty = Number($id('vr-qty').value);
     const precio = Number($id('vr-precio').value);
+    const costo = Number(prodEl.options[prodEl.selectedIndex]?.dataset.costo || 0);
     if (!prodId || !precio) { showToast('Completa todos los campos', 'error'); return; }
     const nuevoStock = Math.max(0, prodStock - qty);
     const ingData = {
@@ -2054,6 +2089,7 @@ async function loadNuevaVenta() {
       monto: qty * precio, forma_pago: $id('vr-fpago').value,
       producto_id: prodId, producto_nombre: prodNombre,
       cantidad: qty, precio_unitario: precio,
+      precio_costo_unitario: costo,
       registrado_por_uid: App.userData.uid,
       registrado_por_nombre: App.userData.nombre,
       fecha: firebase.firestore.Timestamp.fromDate(new Date()),
