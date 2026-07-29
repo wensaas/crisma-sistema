@@ -403,7 +403,7 @@ function loadDashboard() {
               <div class="stat-icon danger">${ico.egresos}</div>
               <div class="stat-label">Capital invertido</div>
               <div class="stat-value" id="d-cap-invertido" style="color:var(--danger)">…</div>
-              <div class="stat-sub">Costo total del inventario actual</div>
+              <div class="stat-sub">Costo del inventario (incluye productos eliminados con stock)</div>
             </div>
             <div class="stat-card">
               <div class="stat-icon teal">${ico.ingresos}</div>
@@ -506,11 +506,13 @@ function loadDashboard() {
     setVal('d-bal-mes', fmtMoney(ingMes-egrMes), balColor(ingMes-egrMes));
 
     if (App.userData.rol === 'admin') {
-      const capitalInvertido = prods.reduce((s, p) => s + (p.precio_costo || 0) * (p.stock || 0), 0);
+      // El capital se calcula sobre TODOS los productos (incluidos los eliminados
+      // con stock restante) para que eliminar un producto no altere las cifras de dinero
+      const capitalInvertido = D.productos.reduce((s, p) => s + (p.precio_costo || 0) * (p.stock || 0), 0);
       const ingresosBrutos   = D.ingresos.reduce((s, i) => s + (i.monto || 0), 0);
       const egresosTotal     = D.egresos.reduce((s, e) => s + (e.monto || 0), 0);
       const ingresosNetos    = ingresosBrutos - egresosTotal;
-      const potencialMaximo  = prods.reduce((s, p) => s + (p.precio_venta || 0) * (p.stock || 0), 0);
+      const potencialMaximo  = D.productos.reduce((s, p) => s + (p.precio_venta || 0) * (p.stock || 0), 0);
       setVal('d-cap-invertido', fmtMoney(capitalInvertido));
       setVal('d-cap-bruto',     fmtMoney(ingresosBrutos));
       setVal('d-cap-neto',      fmtMoney(ingresosNetos), balColor(ingresosNetos));
@@ -758,12 +760,13 @@ function showEditProductoModal(id) {
 }
 
 function showAjusteStockModal(id, nombre, stockActual) {
+  const costoActual = window._appData?.productos?.find(p => p.id === id)?.precio_costo || 0;
   openModal('Ajuste de stock', `
     <form id="ajuste-form">
-      <p style="margin-bottom:16px;font-size:14px"><strong>${nombre}</strong> — Stock actual: <strong>${stockActual}</strong></p>
+      <p style="margin-bottom:16px;font-size:14px"><strong>${nombre}</strong> — Stock actual: <strong>${stockActual}</strong> · Costo actual: <strong>${fmtMoney(costoActual)}</strong>/u</p>
       <div class="form-group">
         <label>Tipo de ajuste</label>
-        <select id="aj-tipo">
+        <select id="aj-tipo" onchange="toggleAjusteCosto()">
           <option value="entrada">Entrada (agregar stock)</option>
           <option value="salida">Salida (restar stock)</option>
           <option value="ajuste">Ajuste directo (fijar cantidad)</option>
@@ -771,7 +774,12 @@ function showAjusteStockModal(id, nombre, stockActual) {
       </div>
       <div class="form-group">
         <label>Cantidad</label>
-        <input type="number" id="aj-cantidad" min="1" value="1" required />
+        <input type="number" id="aj-cantidad" min="1" value="1" required oninput="calcCostoPromedio()" />
+      </div>
+      <div class="form-group" id="aj-costo-group">
+        <label>Costo unitario de este lote <span style="font-weight:400;color:var(--text-muted)">(opcional)</span></label>
+        <div class="input-group"><span class="input-prefix">$</span><input type="number" id="aj-costo" min="0" placeholder="${costoActual || 'Costo por unidad'}" oninput="calcCostoPromedio()" /></div>
+        <div class="form-hint" id="aj-costo-hint">Si esta recompra te salió a otro precio, ingrésalo y el costo del producto se recalcula como promedio ponderado.</div>
       </div>
       <div class="form-group">
         <label>Motivo</label>
@@ -783,6 +791,21 @@ function showAjusteStockModal(id, nombre, stockActual) {
       </div>
     </form>
   `, { sm: true });
+  window.toggleAjusteCosto = () => {
+    $id('aj-costo-group')?.classList.toggle('hidden', $id('aj-tipo').value !== 'entrada');
+  };
+  window.calcCostoPromedio = () => {
+    const hint = $id('aj-costo-hint');
+    if (!hint) return;
+    const qty = Number($id('aj-cantidad').value) || 0;
+    const costoNuevo = Number($id('aj-costo').value) || 0;
+    if ($id('aj-tipo').value === 'entrada' && qty > 0 && costoNuevo > 0) {
+      const prom = Math.round((stockActual * costoActual + qty * costoNuevo) / (stockActual + qty));
+      hint.innerHTML = `Nuevo costo promedio: <strong>${fmtMoney(prom)}</strong>/u (${stockActual} unid. a ${fmtMoney(costoActual)} + ${qty} unid. a ${fmtMoney(costoNuevo)})`;
+    } else {
+      hint.textContent = 'Si esta recompra te salió a otro precio, ingrésalo y el costo del producto se recalcula como promedio ponderado.';
+    }
+  };
   $id('ajuste-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const tipo = $id('aj-tipo').value;
@@ -791,24 +814,32 @@ function showAjusteStockModal(id, nombre, stockActual) {
     if (tipo === 'entrada') nuevoStock = stockActual + qty;
     else if (tipo === 'salida') nuevoStock = Math.max(0, stockActual - qty);
     else nuevoStock = qty;
+    const upd = { stock: nuevoStock };
+    const costoNuevo = Number($id('aj-costo')?.value) || 0;
+    if (tipo === 'entrada' && costoNuevo > 0) {
+      // Promedio ponderado entre el stock existente y el lote nuevo
+      upd.precio_costo = Math.round((stockActual * costoActual + qty * costoNuevo) / (stockActual + qty));
+    }
     try {
       await db.collection('productos').doc(id).update({
-        stock: nuevoStock,
+        ...upd,
         actualizado_en: firebase.firestore.FieldValue.serverTimestamp(),
       });
-      _cacheUpd('productos', id, { stock: nuevoStock });
-      showToast(`Stock actualizado a ${nuevoStock}`);
+      _cacheUpd('productos', id, upd);
+      showToast(upd.precio_costo != null
+        ? `Stock actualizado a ${nuevoStock} · nuevo costo promedio ${fmtMoney(upd.precio_costo)}/u`
+        : `Stock actualizado a ${nuevoStock}`);
       closeModal(); loadInventario();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
   });
 }
 
 async function deleteProducto(id, nombre) {
-  openConfirm(`¿Eliminar el producto "${nombre}"? Esta acción no se puede deshacer.`, async () => {
+  openConfirm(`¿Eliminar el producto "${nombre}"? Se ocultará de las listas, pero su historial de ventas y el capital registrado no se modifican.`, async () => {
     try {
-      await db.collection('productos').doc(id).update({ activo: false });
-      _cacheDel('productos', id);
-      showToast('Producto eliminado'); loadInventario();
+      await db.collection('productos').doc(id).update({ activo: false, actualizado_en: firebase.firestore.FieldValue.serverTimestamp() });
+      _cacheUpd('productos', id, { activo: false });
+      showToast('Producto eliminado — el historial y el capital se conservan'); loadInventario();
     } catch(e) { showToast('Error: ' + e.message, 'error'); }
   });
 }
@@ -1082,6 +1113,7 @@ function renderCreditosTable(creditos) {
       <td><span class="badge ${estadoBadge[c.estado]||'badge-neutral'}">${c.estado}</span></td>
       <td style="white-space:nowrap;display:flex;gap:6px;align-items:center">
         ${c.estado !== 'pagado' ? `<button class="btn btn-sm btn-success" onclick="showRegistrarPagoModal('${c.id}','${esc(c.cliente_nombre||'')}',${c.saldo_pendiente||0})">${ico.pay} Registrar abono</button>` : '<span class="badge badge-success">Saldado</span>'}
+        ${c.estado !== 'pagado' ? `<button class="btn-icon" title="Agregar productos al crédito" onclick="showAgregarProductosCreditoModal('${c.id}')">${ico.plus}</button>` : ''}
         <button class="btn-icon" title="Ver historial de abonos" onclick="showHistorialPagosModal('${c.id}')">${ico.eye}</button>
         ${isAdmin ? `<button class="btn-icon danger" title="Eliminar" onclick="deleteCredito('${c.id}')">${ico.trash}</button>` : ''}
       </td>
@@ -1116,7 +1148,7 @@ async function showAddCreditoModal() {
         <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
           <select id="crf-prod-sel" style="flex:1;min-width:180px">
             <option value="">Selecciona un producto…</option>
-            ${productos.map(p => `<option value="${p.id}" data-nombre="${esc(p.nombre)}" data-stock="${p.stock}" data-precio="${p.precio_venta || 0}">${esc(p.nombre)} (stock: ${p.stock})</option>`).join('')}
+            ${productos.map(p => `<option value="${p.id}" data-nombre="${esc(p.nombre)}" data-stock="${p.stock}" data-precio="${p.precio_venta || 0}" data-costo="${p.precio_costo || 0}">${esc(p.nombre)} (stock: ${p.stock})</option>`).join('')}
           </select>
           <input type="number" id="crf-prod-qty" min="1" value="1" style="width:72px" placeholder="Cant." />
           <button type="button" class="btn btn-secondary" onclick="addCreditoProducto()">Agregar</button>
@@ -1146,6 +1178,7 @@ async function showAddCreditoModal() {
     const productosCredito = window._creditoProductos || [];
     const montoInput = Number($id('crf-monto').value) || 0;
     const montoProds = productosCredito.reduce((s, p) => s + (p.precio_venta || 0) * p.cantidad, 0);
+    const costoTotal = productosCredito.reduce((s, p) => s + (p.precio_costo || 0) * p.cantidad, 0);
     const monto = montoInput > 0 ? montoInput : montoProds;
     if (!monto || monto <= 0) { showToast('Ingresa el monto del crédito o agrega productos con precio', 'error'); return; }
     const vencimiento = $id('crf-vencimiento').value;
@@ -1159,6 +1192,7 @@ async function showAddCreditoModal() {
         cliente_nombre: clienteNombre,
         monto_original: monto,
         saldo_pendiente: monto,
+        costo_total: costoTotal,
         fecha_otorgamiento: firebase.firestore.FieldValue.serverTimestamp(),
         fecha_vencimiento: fechaVenc,
         estado: 'activo',
@@ -1177,7 +1211,7 @@ async function showAddCreditoModal() {
       await batch.commit();
       _cacheAdd('creditos', creditoRef.id, {
         cliente_id: clienteId, cliente_nombre: clienteNombre,
-        monto_original: monto, saldo_pendiente: monto,
+        monto_original: monto, saldo_pendiente: monto, costo_total: costoTotal,
         fecha_vencimiento: fechaVenc, estado: 'activo', observaciones: obs, pagos: [],
         productos: productosCredito,
       });
@@ -1201,6 +1235,7 @@ function addCreditoProducto() {
   const nombre = opt.dataset.nombre;
   const stockDisp = Number(opt.dataset.stock);
   const precio = Number(opt.dataset.precio);
+  const costo = Number(opt.dataset.costo || 0);
   const qty = Math.max(1, Number(qtyInput.value) || 1);
   const yaAgregado = window._creditoProductos.find(p => p.producto_id === prodId);
   const qtyTotal = (yaAgregado?.cantidad || 0) + qty;
@@ -1211,7 +1246,7 @@ function addCreditoProducto() {
   if (yaAgregado) {
     yaAgregado.cantidad = qtyTotal;
   } else {
-    window._creditoProductos.push({ producto_id: prodId, nombre, cantidad: qty, precio_venta: precio });
+    window._creditoProductos.push({ producto_id: prodId, nombre, cantidad: qty, precio_venta: precio, precio_costo: costo });
   }
   _recalcCreditoMonto();
   sel.value = '';
@@ -1252,11 +1287,100 @@ function renderCreditoProductosList() {
     '</div>';
 }
 
+// Agregar productos a un crédito existente: suma al monto original y al saldo,
+// descuenta stock y registra la fecha en que se agregó cada producto.
+async function showAgregarProductosCreditoModal(creditoId) {
+  const cred = window._creditos?.find(x => x.id === creditoId) || window._appData?.creditos?.find(x => x.id === creditoId);
+  if (!cred) { showToast('Crédito no encontrado', 'error'); return; }
+  const productosSnap = await colGet('productos', db.collection('productos'));
+  const productos = productosSnap.docs
+    .filter(d => d.data().activo !== false && (d.data().stock || 0) > 0)
+    .map(d => ({ id: d.id, ...d.data() }))
+    .sort((a, b) => (a.nombre || '').localeCompare(b.nombre || ''));
+  window._creditoProductos = [];
+  openModal(`Agregar productos al crédito — ${cred.cliente_nombre || ''}`, `
+    <form id="agregar-cred-form">
+      <p style="margin-bottom:14px;font-size:14px">Saldo pendiente actual: <strong style="color:var(--danger)">${fmtMoney(cred.saldo_pendiente)}</strong></p>
+      <div class="form-group">
+        <label>Productos a agregar *</label>
+        <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+          <select id="crf-prod-sel" style="flex:1;min-width:180px">
+            <option value="">Selecciona un producto…</option>
+            ${productos.map(p => `<option value="${p.id}" data-nombre="${esc(p.nombre)}" data-stock="${p.stock}" data-precio="${p.precio_venta || 0}" data-costo="${p.precio_costo || 0}">${esc(p.nombre)} (stock: ${p.stock})</option>`).join('')}
+          </select>
+          <input type="number" id="crf-prod-qty" min="1" value="1" style="width:72px" placeholder="Cant." />
+          <button type="button" class="btn btn-secondary" onclick="addCreditoProducto()">Agregar</button>
+        </div>
+        <div id="crf-prod-list" style="margin-top:8px"></div>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+        <button type="submit" class="btn btn-primary">Sumar al crédito</button>
+      </div>
+    </form>
+  `);
+  renderCreditoProductosList();
+  $id('agregar-cred-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const items = window._creditoProductos || [];
+    if (!items.length) { showToast('Agrega al menos un producto', 'error'); return; }
+    const fechaAgregado = firebase.firestore.Timestamp.now();
+    const nuevos = items.map(p => ({ ...p, fecha_agregado: fechaAgregado }));
+    const montoExtra = items.reduce((s, p) => s + (p.precio_venta || 0) * p.cantidad, 0);
+    const costoExtra = items.reduce((s, p) => s + (p.precio_costo || 0) * p.cantidad, 0);
+    try {
+      const batch = db.batch();
+      batch.update(db.collection('creditos').doc(creditoId), {
+        monto_original: firebase.firestore.FieldValue.increment(montoExtra),
+        saldo_pendiente: firebase.firestore.FieldValue.increment(montoExtra),
+        costo_total: firebase.firestore.FieldValue.increment(costoExtra),
+        productos: firebase.firestore.FieldValue.arrayUnion(...nuevos),
+      });
+      for (const item of items) {
+        batch.update(db.collection('productos').doc(item.producto_id), {
+          stock: firebase.firestore.FieldValue.increment(-item.cantidad),
+        });
+      }
+      await batch.commit();
+      const upd = {
+        monto_original: (cred.monto_original || 0) + montoExtra,
+        saldo_pendiente: (cred.saldo_pendiente || 0) + montoExtra,
+        costo_total: (cred.costo_total || 0) + costoExtra,
+        productos: [...(cred.productos || []), ...nuevos],
+      };
+      _cacheUpd('creditos', creditoId, upd);
+      const credLocal = window._creditos?.find(x => x.id === creditoId);
+      if (credLocal) Object.assign(credLocal, upd);
+      for (const item of items) {
+        const p = window._appData?.productos?.find(x => x.id === item.producto_id);
+        if (p) p.stock = Math.max(0, (p.stock || 0) - item.cantidad);
+        const invProd = window._invProductos?.find(x => x.id === item.producto_id);
+        if (invProd) invProd.stock = Math.max(0, (invProd.stock || 0) - item.cantidad);
+      }
+      showToast(`Se sumaron ${fmtMoney(montoExtra)} al crédito de ${cred.cliente_nombre || 'la clienta'}`);
+      closeModal(); loadCreditos();
+    } catch(err) { showToast('Error: ' + err.message, 'error'); }
+  });
+}
+
+// Proporción del crédito que corresponde a capital (costo de los productos).
+// Cada abono se reparte con esa misma proporción entre capital y ganancia.
+function _ratioCapitalCredito(cred) {
+  if (!cred || !(cred.monto_original > 0)) return 0;
+  const costoTotal = cred.costo_total ?? (cred.productos || []).reduce((s, p) => s + (p.precio_costo || 0) * (p.cantidad || 1), 0);
+  if (!(costoTotal > 0)) return 0;
+  return Math.min(1, costoTotal / cred.monto_original);
+}
+
 function showRegistrarPagoModal(creditoId, clienteNombre, saldoPendiente) {
+  const cred = window._creditos?.find(x => x.id === creditoId) || window._appData?.creditos?.find(x => x.id === creditoId);
+  const ratioCapital = _ratioCapitalCredito(cred);
   openModal(`Registrar pago — ${clienteNombre}`, `
     <form id="pago-form">
       <p style="margin-bottom:16px;font-size:14px">Saldo pendiente: <strong style="color:var(--danger)">${fmtMoney(saldoPendiente)}</strong></p>
-      <div class="form-group"><label>Monto del pago *</label><div class="input-group"><span class="input-prefix">$</span><input type="number" id="pf-monto" min="1" max="${saldoPendiente}" value="${saldoPendiente}" required /></div></div>
+      <div class="form-group"><label>Monto del pago *</label><div class="input-group"><span class="input-prefix">$</span><input type="number" id="pf-monto" min="1" max="${saldoPendiente}" value="${saldoPendiente}" required /></div>
+        <div class="form-hint" id="pf-desglose"></div>
+      </div>
       <div class="form-group"><label>Fecha del pago</label><input type="date" id="pf-fecha" value="${todayStr()}" required /></div>
       <div class="form-group"><label>Notas</label><input type="text" id="pf-notas" placeholder="Opcional…" /></div>
       <div class="form-actions">
@@ -1265,6 +1389,19 @@ function showRegistrarPagoModal(creditoId, clienteNombre, saldoPendiente) {
       </div>
     </form>
   `, { sm: true });
+  const _updDesglose = () => {
+    const el = $id('pf-desglose');
+    if (!el) return;
+    const m = Number($id('pf-monto').value) || 0;
+    if (ratioCapital > 0 && m > 0) {
+      const cap = Math.round(m * ratioCapital);
+      el.innerHTML = `De este abono: <strong>${fmtMoney(cap)}</strong> capital · <strong style="color:var(--teal-dark)">${fmtMoney(m - cap)}</strong> ganancia`;
+    } else {
+      el.textContent = 'Sin datos de costo en este crédito — no se puede separar capital y ganancia.';
+    }
+  };
+  _updDesglose();
+  $id('pf-monto').addEventListener('input', _updDesglose);
   $id('pago-form').addEventListener('submit', async (e) => {
     e.preventDefault();
     const montoPago = Number($id('pf-monto').value);
@@ -1273,14 +1410,18 @@ function showRegistrarPagoModal(creditoId, clienteNombre, saldoPendiente) {
     const nuevoEstado = nuevoSaldo === 0 ? 'pagado' : 'activo';
     const fechaTS = firebase.firestore.Timestamp.fromDate(parseLocalDate(fechaPago));
     const notas = $id('pf-notas').value.trim();
+    const capitalPago = ratioCapital > 0 ? Math.round(montoPago * ratioCapital) : null;
+    const gananciaPago = capitalPago != null ? montoPago - capitalPago : null;
     try {
+      const pagoObj = {
+        monto: montoPago, fecha: fechaTS, notas,
+        registrado_por: App.userData.nombre,
+      };
+      if (capitalPago != null) { pagoObj.capital = capitalPago; pagoObj.ganancia = gananciaPago; }
       await db.collection('creditos').doc(creditoId).update({
         saldo_pendiente: nuevoSaldo,
         estado: nuevoEstado,
-        pagos: firebase.firestore.FieldValue.arrayUnion({
-          monto: montoPago, fecha: fechaTS, notas,
-          registrado_por: App.userData.nombre,
-        }),
+        pagos: firebase.firestore.FieldValue.arrayUnion(pagoObj),
       });
       _cacheUpd('creditos', creditoId, { saldo_pendiente: nuevoSaldo, estado: nuevoEstado });
       const ingData = {
@@ -1294,6 +1435,7 @@ function showRegistrarPagoModal(creditoId, clienteNombre, saldoPendiente) {
         registrado_por_nombre: App.userData.nombre,
         fecha: fechaTS,
       };
+      if (capitalPago != null) { ingData.capital = capitalPago; ingData.ganancia = gananciaPago; }
       const ingRef = await db.collection('ingresos').add(ingData);
       _cacheAdd('ingresos', ingRef.id, ingData);
       showToast(nuevoEstado === 'pagado' ? '✅ Crédito saldado' : 'Pago registrado');
@@ -1338,6 +1480,7 @@ function showHistorialPagosModal(creditoId) {
             <div>
               <strong>${p.nombre}</strong>
               <span style="font-size:12px;color:var(--text-muted);margin-left:6px">&times; ${p.cantidad} &mdash; ${fmtMoney(p.precio_venta || 0)} c/u</span>
+              ${p.fecha_agregado ? `<div style="font-size:11px;color:var(--blue);margin-top:2px">Agregado el ${fmtDate(p.fecha_agregado)}</div>` : ''}
             </div>
             <strong style="color:var(--navy)">${fmtMoney((p.precio_venta || 0) * (p.cantidad || 1))}</strong>
           </div>
@@ -1356,6 +1499,7 @@ function showHistorialPagosModal(creditoId) {
         <div class="pago-item" style="display:flex;justify-content:space-between;align-items:flex-start">
           <div>
             <strong style="color:var(--teal-dark)">${fmtMoney(p.monto)}</strong>
+            ${p.capital != null ? `<span style="font-size:12px;color:var(--text-muted);margin-left:6px">(capital ${fmtMoney(p.capital)} · ganancia ${fmtMoney(p.ganancia)})</span>` : ''}
             ${p.notas ? `<span style="font-size:12px;color:var(--text-muted);margin-left:6px">${p.notas}</span>` : ''}
             <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${fmtDate(p.fecha)}${p.registrado_por ? ` · ${p.registrado_por}` : ''}</div>
           </div>
@@ -1469,7 +1613,8 @@ function renderIngresosTable(ingresos) {
       <td>
         <strong>${i.concepto || '—'}</strong>
         ${i.cliente_nombre ? `<br><span style="font-size:12px;color:var(--text-muted)">${i.cliente_nombre}</span>` : ''}
-        ${i.producto_nombre ? `<br><span style="font-size:12px;color:var(--text-muted)">${i.producto_nombre}${i.cantidad ? ` ×${i.cantidad}` : ''}</span>` : ''}
+        ${i.items ? i.items.map(it => `<br><span style="font-size:12px;color:var(--text-muted)">${it.nombre} ×${it.cantidad} — ${fmtMoney(it.precio_unitario * it.cantidad)}</span>`).join('') :
+          i.producto_nombre ? `<br><span style="font-size:12px;color:var(--text-muted)">${i.producto_nombre}${i.cantidad ? ` ×${i.cantidad}` : ''}</span>` : ''}
       </td>
       <td><span class="badge badge-info">${catIngLabel[i.categoria] || i.categoria || '—'}</span></td>
       <td class="fw-700 amount-income">${fmtMoney(i.monto)}</td>
@@ -1478,6 +1623,128 @@ function renderIngresosTable(ingresos) {
       ${isAdmin ? `<td><button class="btn-icon danger" onclick="deleteIngreso('${i.id}')">${ico.trash}</button></td>` : ''}
     </tr>
   `).join('');
+}
+
+// ---- Carrito de venta (compartido entre el modal de ingresos y el panel del cajero) ----
+
+function ventaCartHTML(prodDocs) {
+  return `
+    <div class="form-group">
+      <label>Productos *</label>
+      <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+        <select id="vt-prod" onchange="vtAutoFill()" style="flex:1;min-width:180px">
+          <option value="">Selecciona producto…</option>
+          ${prodDocs.map(d => `<option value="${d.id}" data-precio="${d.data().precio_venta}" data-costo="${d.data().precio_costo || 0}" data-nombre="${esc(d.data().nombre)}" data-stock="${d.data().stock}">${d.data().nombre} (stock: ${d.data().stock})</option>`).join('')}
+        </select>
+        <input type="number" id="vt-qty" min="1" value="1" style="width:72px" placeholder="Cant." />
+        <div class="input-group" style="width:130px"><span class="input-prefix">$</span><input type="number" id="vt-precio" min="0" placeholder="Precio" /></div>
+        <button type="button" class="btn btn-secondary" onclick="addVentaItem()">Agregar</button>
+      </div>
+      <div id="vt-list" style="margin-top:8px"></div>
+    </div>
+    <div style="padding:10px 14px;background:var(--bg);border-radius:6px;margin-bottom:12px;font-size:15px">
+      Total: <strong id="vt-total" style="color:var(--blue)">$0</strong>
+    </div>`;
+}
+
+function vtAutoFill() {
+  const el = $id('vt-prod');
+  if (!el) return;
+  const opt = el.options[el.selectedIndex];
+  if (opt?.dataset.precio) $id('vt-precio').value = opt.dataset.precio;
+}
+
+function addVentaItem() {
+  const sel = $id('vt-prod');
+  const prodId = sel.value;
+  if (!prodId) { showToast('Selecciona un producto', 'error'); return; }
+  const opt = sel.options[sel.selectedIndex];
+  const qty = Math.max(1, Number($id('vt-qty').value) || 1);
+  const precio = Number($id('vt-precio').value);
+  if (!precio) { showToast('Ingresa el precio', 'error'); return; }
+  // El stock se valida contra el cache (siempre actualizado tras cada venta)
+  const stockDisp = window._appData?.productos?.find(p => p.id === prodId)?.stock ?? Number(opt.dataset.stock || 0);
+  const ya = window._ventaItems.find(it => it.producto_id === prodId);
+  const qtyTotal = (ya?.cantidad || 0) + qty;
+  if (qtyTotal > stockDisp) { showToast(`Stock insuficiente (disponible: ${stockDisp})`, 'error'); return; }
+  if (ya) { ya.cantidad = qtyTotal; ya.precio_unitario = precio; }
+  else window._ventaItems.push({ producto_id: prodId, nombre: opt.dataset.nombre, cantidad: qty, precio_unitario: precio, precio_costo_unitario: Number(opt.dataset.costo || 0) });
+  renderVentaItems();
+  sel.value = '';
+  $id('vt-qty').value = 1;
+  $id('vt-precio').value = '';
+}
+
+function removeVentaItem(prodId) {
+  window._ventaItems = window._ventaItems.filter(it => it.producto_id !== prodId);
+  renderVentaItems();
+}
+
+function renderVentaItems() {
+  const list = $id('vt-list');
+  const totalEl = $id('vt-total');
+  const items = window._ventaItems || [];
+  const total = items.reduce((s, it) => s + it.precio_unitario * it.cantidad, 0);
+  if (totalEl) totalEl.textContent = fmtMoney(total);
+  if (!list) return;
+  if (!items.length) {
+    list.innerHTML = '<p style="font-size:13px;color:var(--text-muted);margin:4px 0">Sin productos agregados</p>';
+    return;
+  }
+  list.innerHTML = '<div class="pagos-list">' + items.map(it => `
+    <div class="pago-item" style="display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <strong>${it.nombre}</strong> &times; ${it.cantidad}
+        <span style="font-size:12px;color:var(--text-muted);margin-left:6px">${fmtMoney(it.precio_unitario)} c/u = ${fmtMoney(it.precio_unitario * it.cantidad)}</span>
+      </div>
+      <button type="button" class="btn-icon danger" title="Quitar" onclick="removeVentaItem('${it.producto_id}')">${ico.trash}</button>
+    </div>
+  `).join('') + '</div>';
+}
+
+// Crea UN solo ingreso con todos los productos del carrito y descuenta stock en batch.
+// Devuelve el monto total o null si falló / el carrito está vacío.
+async function registrarVenta({ fecha, formaPago, clienteId = null, clienteNombre = null, descontarStock = true }) {
+  const items = window._ventaItems || [];
+  if (!items.length) { showToast('Agrega al menos un producto a la venta', 'error'); return null; }
+  const monto = items.reduce((s, it) => s + it.precio_unitario * it.cantidad, 0);
+  const ingData = {
+    concepto: items.length === 1 ? `Venta: ${items[0].nombre}` : `Venta: ${items.length} productos`,
+    categoria: 'venta_producto',
+    monto,
+    forma_pago: formaPago,
+    cliente_id: clienteId,
+    cliente_nombre: clienteNombre,
+    items: items.map(it => ({ producto_id: it.producto_id, nombre: it.nombre, cantidad: it.cantidad, precio_unitario: it.precio_unitario, precio_costo_unitario: it.precio_costo_unitario })),
+    registrado_por_uid: App.userData.uid,
+    registrado_por_nombre: App.userData.nombre,
+    fecha,
+  };
+  try {
+    const batch = db.batch();
+    const ingRef = db.collection('ingresos').doc();
+    batch.set(ingRef, ingData);
+    if (descontarStock) {
+      for (const it of items) {
+        batch.update(db.collection('productos').doc(it.producto_id), {
+          stock: firebase.firestore.FieldValue.increment(-it.cantidad),
+          actualizado_en: firebase.firestore.FieldValue.serverTimestamp(),
+        });
+      }
+    }
+    await batch.commit();
+    _cacheAdd('ingresos', ingRef.id, ingData);
+    if (descontarStock) {
+      for (const it of items) {
+        const p = window._appData?.productos?.find(x => x.id === it.producto_id);
+        if (p) p.stock = Math.max(0, (p.stock || 0) - it.cantidad);
+        const invProd = window._invProductos?.find(x => x.id === it.producto_id);
+        if (invProd) invProd.stock = Math.max(0, (invProd.stock || 0) - it.cantidad);
+      }
+    }
+    window._ventaItems = [];
+    return monto;
+  } catch(err) { showToast('Error: ' + err.message, 'error'); return null; }
 }
 
 async function showAddIngresoModal() {
@@ -1498,20 +1765,7 @@ async function showAddIngresoModal() {
         <div class="form-group"><label>Fecha *</label><input type="date" id="if-fecha" value="${todayStr()}" required /></div>
       </div>
       <div id="if-venta-fields">
-        <div class="form-group">
-          <label>Producto *</label>
-          <select id="if-producto" onchange="autoFillPrecio()">
-            <option value="">Selecciona producto…</option>
-            ${prods.map(d => `<option value="${d.id}" data-precio="${d.data().precio_venta}" data-costo="${d.data().precio_costo||0}" data-nombre="${esc(d.data().nombre)}" data-stock="${d.data().stock}">${d.data().nombre} (stock: ${d.data().stock})</option>`).join('')}
-          </select>
-        </div>
-        <div class="form-row">
-          <div class="form-group"><label>Cantidad *</label><input type="number" id="if-cantidad" min="1" value="1" oninput="calcTotal()" /></div>
-          <div class="form-group"><label>Precio unitario *</label><div class="input-group"><span class="input-prefix">$</span><input type="number" id="if-precio" min="0" oninput="calcTotal()" /></div></div>
-        </div>
-        <div style="padding:10px 14px;background:var(--bg);border-radius:6px;margin-bottom:12px;font-size:14px">
-          Total: <strong id="if-total" style="color:var(--blue)">$0</strong>
-        </div>
+        ${ventaCartHTML(prods)}
         <div class="form-group">
           <label>Cliente (opcional)</label>
           <select id="if-cliente-venta">
@@ -1542,6 +1796,8 @@ async function showAddIngresoModal() {
       </div>
     </form>
   `, { lg: true });
+  window._ventaItems = [];
+  renderVentaItems();
 
   $id('ingreso-form').addEventListener('submit', async (e) => {
     e.preventDefault();
@@ -1549,48 +1805,15 @@ async function showAddIngresoModal() {
     const fecha = firebase.firestore.Timestamp.fromDate(parseLocalDate($id('if-fecha').value));
     try {
       if (cat === 'venta_producto') {
-        const prodEl = $id('if-producto');
-        const prodId = prodEl.value;
-        const prodNombre = prodEl.options[prodEl.selectedIndex]?.dataset.nombre || '';
-        const prodStock = Number(prodEl.options[prodEl.selectedIndex]?.dataset.stock || 0);
-        const qty = Number($id('if-cantidad').value);
-        const precio = Number($id('if-precio').value);
-        const costo = Number(prodEl.options[prodEl.selectedIndex]?.dataset.costo || 0);
-        const monto = qty * precio;
         const clienteEl = $id('if-cliente-venta');
-        const clienteId = clienteEl.value;
-        const clienteNombre = clienteEl.options[clienteEl.selectedIndex]?.dataset.nombre || '';
-
-        if (!prodId) { showToast('Selecciona un producto', 'error'); return; }
-        if (!precio) { showToast('Ingresa el precio', 'error'); return; }
-
-        const ingData = {
-          concepto: `Venta: ${prodNombre}`,
-          categoria: 'venta_producto',
-          monto,
-          forma_pago: $id('if-fpago').value,
-          cliente_id: clienteId || null,
-          cliente_nombre: clienteNombre || null,
-          producto_id: prodId,
-          producto_nombre: prodNombre,
-          cantidad: qty,
-          precio_unitario: precio,
-          precio_costo_unitario: costo,
-          registrado_por_uid: App.userData.uid,
-          registrado_por_nombre: App.userData.nombre,
+        const total = await registrarVenta({
           fecha,
-        };
-        const ingRef = await db.collection('ingresos').add(ingData);
-        _cacheAdd('ingresos', ingRef.id, ingData);
-
-        if ($id('if-descontar-stock').checked && prodId) {
-          const nuevoStock = Math.max(0, prodStock - qty);
-          await db.collection('productos').doc(prodId).update({
-            stock: nuevoStock,
-            actualizado_en: firebase.firestore.FieldValue.serverTimestamp(),
-          });
-          _cacheUpd('productos', prodId, { stock: nuevoStock });
-        }
+          formaPago: $id('if-fpago').value,
+          clienteId: clienteEl.value || null,
+          clienteNombre: clienteEl.options[clienteEl.selectedIndex]?.dataset.nombre || null,
+          descontarStock: $id('if-descontar-stock').checked,
+        });
+        if (total == null) return;
       } else {
         const concepto = $id('if-concepto').value.trim();
         const monto = Number($id('if-monto-otro').value);
@@ -1617,21 +1840,6 @@ function toggleIngresoCat() {
   const cat = $id('if-cat')?.value;
   $id('if-venta-fields')?.classList.toggle('hidden', cat !== 'venta_producto');
   $id('if-otro-fields')?.classList.toggle('hidden', cat === 'venta_producto');
-}
-
-function autoFillPrecio() {
-  const el = $id('if-producto');
-  if (!el) return;
-  const opt = el.options[el.selectedIndex];
-  if (opt?.dataset.precio) $id('if-precio').value = opt.dataset.precio;
-  calcTotal();
-}
-
-function calcTotal() {
-  const qty = Number($id('if-cantidad')?.value || 0);
-  const precio = Number($id('if-precio')?.value || 0);
-  const totalEl = $id('if-total');
-  if (totalEl) totalEl.textContent = fmtMoney(qty * precio);
 }
 
 async function deleteIngreso(id) {
@@ -1871,9 +2079,21 @@ function generarLiquidacion() {
 
     const ventas = ingresos.filter(i => i.categoria === 'venta_producto');
     const totalVentas = ventas.reduce((s, i) => s + (i.monto || 0), 0);
-    const costoVentas = ventas.reduce((s, i) => s + ((i.precio_costo_unitario || 0) * (i.cantidad || 0)), 0);
+    // Costo de una venta: suma de items (venta multi-producto) o campos legados
+    const costoVenta = i => i.items
+      ? i.items.reduce((s, it) => s + ((it.precio_costo_unitario || 0) * (it.cantidad || 0)), 0)
+      : (i.precio_costo_unitario || 0) * (i.cantidad || 0);
+    const costoVentas = ventas.reduce((s, i) => s + costoVenta(i), 0);
     const gananciaBruta = totalVentas - costoVentas;
     const hayCostos = costoVentas > 0;
+
+    // Abonos a créditos del período, con desglose capital/ganancia cuando existe
+    const abonos = ingresos.filter(i => i.categoria === 'pago_credito');
+    const totalAbonos = abonos.reduce((s, i) => s + (i.monto || 0), 0);
+    const abonosConDesglose = abonos.filter(i => i.capital != null);
+    const abonosCapital = abonosConDesglose.reduce((s, i) => s + (i.capital || 0), 0);
+    const abonosGanancia = abonosConDesglose.reduce((s, i) => s + (i.ganancia || 0), 0);
+    const abonosSinDesglose = totalAbonos - abonosCapital - abonosGanancia;
 
     // Group by category
     const ingPorCat = {};
@@ -1903,6 +2123,30 @@ function generarLiquidacion() {
             </div>
           </div>
           ${!hayCostos && ventas.length > 0 ? `<p style="font-size:12px;color:var(--text-muted);margin:12px 0 0;padding-top:10px;border-top:1px solid var(--border)">${ico.info} Las ventas anteriores no tienen precio de costo registrado. El costo se guardará automáticamente en nuevas ventas.</p>` : ''}
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px">
+        <div class="card-header"><h3>${ico.creditos} Abonos a créditos del período — ${abonos.length} pagos</h3></div>
+        <div class="card-body" style="padding:16px 20px">
+          <div class="report-summary" style="margin:0">
+            <div class="report-card income">
+              <div class="rc-label">Total abonado</div>
+              <div class="rc-value">${fmtMoney(totalAbonos)}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:4px">dinero recibido por créditos</div>
+            </div>
+            <div class="report-card expense">
+              <div class="rc-label">Capital recuperado</div>
+              <div class="rc-value">${fmtMoney(abonosCapital)}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:4px">costo de la mercancía fiada</div>
+            </div>
+            <div class="report-card balance">
+              <div class="rc-label">Ganancia en abonos</div>
+              <div class="rc-value" style="color:var(--teal-dark)">${fmtMoney(abonosGanancia)}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-top:4px">abonos menos capital</div>
+            </div>
+          </div>
+          ${abonosSinDesglose > 0 ? `<p style="font-size:12px;color:var(--text-muted);margin:12px 0 0;padding-top:10px;border-top:1px solid var(--border)">${ico.info} ${fmtMoney(abonosSinDesglose)} en abonos de créditos antiguos sin datos de costo — no se pueden separar en capital y ganancia. Los créditos nuevos con productos sí guardan el desglose.</p>` : ''}
         </div>
       </div>
 
@@ -2029,20 +2273,7 @@ async function loadNuevaVenta() {
 
   $id('venta-rapida').innerHTML = `
     <form id="vr-form">
-      <div class="form-group">
-        <label>Producto *</label>
-        <select id="vr-prod" onchange="vrAutoFill()" required>
-          <option value="">Selecciona…</option>
-          ${prods.docs.map(d => `<option value="${d.id}" data-precio="${d.data().precio_venta}" data-costo="${d.data().precio_costo||0}" data-nombre="${esc(d.data().nombre)}" data-stock="${d.data().stock}">${d.data().nombre} — stock: ${d.data().stock}</option>`).join('')}
-        </select>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Cantidad</label><input type="number" id="vr-qty" min="1" value="1" oninput="vrCalc()" /></div>
-        <div class="form-group"><label>Precio</label><div class="input-group"><span class="input-prefix">$</span><input type="number" id="vr-precio" min="0" oninput="vrCalc()" /></div></div>
-      </div>
-      <div style="background:var(--bg);border-radius:6px;padding:12px 14px;margin-bottom:12px;font-size:15px">
-        Total: <strong id="vr-total" style="color:var(--blue)">$0</strong>
-      </div>
+      ${ventaCartHTML(prods.docs)}
       <div class="form-group">
         <label>Forma de pago</label>
         <select id="vr-fpago">
@@ -2054,6 +2285,8 @@ async function loadNuevaVenta() {
       <button type="submit" class="btn btn-success btn-full">${ico.plus} Registrar venta</button>
     </form>
   `;
+  window._ventaItems = [];
+  renderVentaItems();
 
   $id('credito-rapido').innerHTML = `
     <form id="cr-form">
@@ -2076,34 +2309,15 @@ async function loadNuevaVenta() {
 
   $id('vr-form').addEventListener('submit', async (e) => {
     e.preventDefault();
-    const prodEl = $id('vr-prod');
-    const prodId = prodEl.value;
-    const prodNombre = prodEl.options[prodEl.selectedIndex]?.dataset.nombre || '';
-    const prodStock = Number(prodEl.options[prodEl.selectedIndex]?.dataset.stock || 0);
-    const qty = Number($id('vr-qty').value);
-    const precio = Number($id('vr-precio').value);
-    const costo = Number(prodEl.options[prodEl.selectedIndex]?.dataset.costo || 0);
-    if (!prodId || !precio) { showToast('Completa todos los campos', 'error'); return; }
-    const nuevoStock = Math.max(0, prodStock - qty);
-    const ingData = {
-      concepto: `Venta: ${prodNombre}`, categoria: 'venta_producto',
-      monto: qty * precio, forma_pago: $id('vr-fpago').value,
-      producto_id: prodId, producto_nombre: prodNombre,
-      cantidad: qty, precio_unitario: precio,
-      precio_costo_unitario: costo,
-      registrado_por_uid: App.userData.uid,
-      registrado_por_nombre: App.userData.nombre,
+    const total = await registrarVenta({
       fecha: firebase.firestore.Timestamp.fromDate(new Date()),
-    };
-    try {
-      const ingRef = await db.collection('ingresos').add(ingData);
-      _cacheAdd('ingresos', ingRef.id, ingData);
-      await db.collection('productos').doc(prodId).update({ stock: nuevoStock, actualizado_en: firebase.firestore.FieldValue.serverTimestamp() });
-      _cacheUpd('productos', prodId, { stock: nuevoStock });
-      showToast(`Venta registrada: ${fmtMoney(qty * precio)}`);
-      $id('vr-form').reset();
-      $id('vr-total').textContent = '$0';
-    } catch(err) { showToast('Error: ' + err.message, 'error'); }
+      formaPago: $id('vr-fpago').value,
+      descontarStock: true,
+    });
+    if (total == null) return;
+    showToast(`Venta registrada: ${fmtMoney(total)}`);
+    $id('vr-form').reset();
+    renderVentaItems();
   });
 
   $id('cr-form').addEventListener('submit', async (e) => {
@@ -2134,20 +2348,6 @@ async function loadNuevaVenta() {
       $id('cr-form').reset();
     } catch(err) { showToast('Error: ' + err.message, 'error'); }
   });
-}
-
-function vrAutoFill() {
-  const el = $id('vr-prod');
-  if (!el) return;
-  const opt = el.options[el.selectedIndex];
-  if (opt?.dataset.precio) $id('vr-precio').value = opt.dataset.precio;
-  vrCalc();
-}
-function vrCalc() {
-  const qty = Number($id('vr-qty')?.value || 0);
-  const precio = Number($id('vr-precio')?.value || 0);
-  const el = $id('vr-total');
-  if (el) el.textContent = fmtMoney(qty * precio);
 }
 
 // =============================================
